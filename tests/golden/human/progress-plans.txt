@@ -1,0 +1,2 @@
+Registry Snapshot: all 1 item, 1.0 KiB, is cached
+Package containers: 4.9 KiB to download across 2 items; 3.9 KiB of 8.8 KiB cached

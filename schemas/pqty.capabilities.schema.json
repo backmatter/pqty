@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/backmatter/pqty/main/schemas/pqty.capabilities.schema.json",
+  "title": "pqty.capabilities/v1",
+  "type": "object",
+  "required": [
+    "schema",
+    "version",
+    "lock_schema",
+    "environment_schema",
+    "trace_schema",
+    "trace_report_schema",
+    "convergence_report_schema",
+    "progress_schema"
+  ],
+  "properties": {
+    "schema": {
+      "const": "pqty.capabilities/v1"
+    },
+    "version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "lock_schema": {
+      "const": "pqty.lock/v1"
+    },
+    "environment_schema": {
+      "const": "pqty.env/v1"
+    },
+    "trace_schema": {
+      "const": "pqty.trace/v1"
+    },
+    "trace_report_schema": {
+      "const": "pqty.trace-report/v1"
+    },
+    "convergence_report_schema": {
+      "const": "pqty.convergence-report/v1"
+    },
+    "progress_schema": {
+      "const": "pqty.progress/v1"
+    }
+  },
+  "additionalProperties": false
+}

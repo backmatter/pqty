@@ -1,0 +1,13 @@
+{
+  "schema": "pqty.trace/v1",
+  "producer": "pqty-fls 0.1.0",
+  "environment_fingerprint": "sha256:95ea8e9b9a2b0b5478a49763e115d9adb5f0a66d2f340f235bb28b08bbeb434a",
+  "inputs": [
+    {
+      "requested": "foo.sty",
+      "resolved": "tex/latex/foo/foo.sty",
+      "scope": "package",
+      "kind": "tex"
+    }
+  ]
+}

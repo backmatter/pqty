@@ -1,0 +1,166 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/backmatter/pqty/main/schemas/pqty.progress.schema.json",
+  "title": "pqty.progress/v1",
+  "oneOf": [
+    {
+      "type": "object",
+      "required": [
+        "schema",
+        "event",
+        "category",
+        "items_total",
+        "items_cached"
+      ],
+      "properties": {
+        "schema": {
+          "const": "pqty.progress/v1"
+        },
+        "event": {
+          "const": "download-plan"
+        },
+        "category": {
+          "enum": ["registry", "packages"]
+        },
+        "items_total": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "items_cached": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "bytes_total": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "bytes_cached": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "bytes_to_download": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "schema",
+        "event",
+        "category",
+        "item",
+        "url",
+        "attempt"
+      ],
+      "properties": {
+        "schema": {
+          "const": "pqty.progress/v1"
+        },
+        "event": {
+          "const": "download-start"
+        },
+        "category": {
+          "enum": ["registry", "packages"]
+        },
+        "item": {
+          "type": "string",
+          "minLength": 1
+        },
+        "url": {
+          "type": "string",
+          "minLength": 1
+        },
+        "attempt": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "bytes_total": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "schema",
+        "event",
+        "category",
+        "item",
+        "bytes_received",
+        "elapsed_millis"
+      ],
+      "properties": {
+        "schema": {
+          "const": "pqty.progress/v1"
+        },
+        "event": {
+          "const": "download-progress"
+        },
+        "category": {
+          "enum": ["registry", "packages"]
+        },
+        "item": {
+          "type": "string",
+          "minLength": 1
+        },
+        "bytes_received": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "bytes_total": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "elapsed_millis": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "schema",
+        "event",
+        "category",
+        "item",
+        "bytes_received",
+        "elapsed_millis"
+      ],
+      "properties": {
+        "schema": {
+          "const": "pqty.progress/v1"
+        },
+        "event": {
+          "const": "download-complete"
+        },
+        "category": {
+          "enum": ["registry", "packages"]
+        },
+        "item": {
+          "type": "string",
+          "minLength": 1
+        },
+        "bytes_received": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "bytes_total": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "elapsed_millis": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    }
+  ]
+}

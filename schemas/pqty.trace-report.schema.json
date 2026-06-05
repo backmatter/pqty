@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/backmatter/pqty/main/schemas/pqty.trace-report.schema.json",
+  "title": "pqty trace reconciliation report v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "environment_fingerprint",
+    "matched",
+    "missing",
+    "ignored"
+  ],
+  "properties": {
+    "schema": {
+      "const": "pqty.trace-report/v1"
+    },
+    "environment_fingerprint": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "matched": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/match"
+      }
+    },
+    "missing": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/input"
+      }
+    },
+    "ignored": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/input"
+      }
+    }
+  },
+  "$defs": {
+    "match": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requested",
+        "tds_path",
+        "owner"
+      ],
+      "properties": {
+        "requested": {
+          "type": "string",
+          "minLength": 1
+        },
+        "tds_path": {
+          "type": "string",
+          "pattern": "^(?!texmf-dist/)(?!RELOC/)(?!/)(?![A-Za-z]:)(?!.*:)(?!.*\\\\)(?!.*[\\u0000-\\u001F\\u007F])(?!.*(?:^|/)(?:\\.|\\.\\.)(?:/|$))(?!.*//).+$"
+        },
+        "owner": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.+-]+$",
+          "maxLength": 255
+        }
+      }
+    },
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requested",
+        "scope"
+      ],
+      "properties": {
+        "requested": {
+          "type": "string",
+          "minLength": 1
+        },
+        "resolved": {
+          "type": "string",
+          "pattern": "^(?!/)(?![A-Za-z]:)(?!.*\\\\)(?!.*[\\u0000-\\u001F\\u007F])(?!.*(?:^|/)(?:\\.|\\.\\.)(?:/|$))(?!.*//).+$"
+        },
+        "scope": {
+          "enum": [
+            "package",
+            "project",
+            "engine",
+            "output"
+          ]
+        },
+        "kind": {
+          "enum": [
+            "tex",
+            "bibliography",
+            "font-metric",
+            "virtual-font",
+            "type1-font",
+            "open-type-font",
+            "true-type-font",
+            "font-family",
+            "map",
+            "encoding",
+            "hyphenation",
+            "format",
+            "binary",
+            "data"
+          ]
+        }
+      }
+    }
+  }
+}

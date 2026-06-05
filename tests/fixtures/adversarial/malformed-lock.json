@@ -1,0 +1,16 @@
+{
+  "schema": "pqty.lock/v1",
+  "stage": "exact",
+  "generated_with": "adversarial-fixture",
+  "root": "../escape",
+  "sources": [],
+  "document_class": null,
+  "loaded_classes": [],
+  "packages": [],
+  "inputs": [],
+  "bibliographies": [],
+  "graphics": [],
+  "closure": [],
+  "unresolved": [],
+  "unexpected": true
+}

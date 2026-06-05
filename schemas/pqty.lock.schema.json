@@ -1,0 +1,637 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/backmatter/pqty/main/schemas/pqty.lock.schema.json",
+  "title": "pqty lockfile v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "stage",
+    "generated_with",
+    "root",
+    "sources",
+    "document_class",
+    "loaded_classes",
+    "packages",
+    "inputs",
+    "bibliographies",
+    "graphics",
+    "unresolved"
+  ],
+  "properties": {
+    "schema": {
+      "const": "pqty.lock/v1"
+    },
+    "stage": {
+      "enum": [
+        "scanned",
+        "resolved",
+        "exact"
+      ]
+    },
+    "generated_with": {
+      "type": "string",
+      "minLength": 1
+    },
+    "environment": {
+      "$ref": "#/$defs/environment"
+    },
+    "registries": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/registry"
+      }
+    },
+    "consumer_requirements": {
+      "$ref": "#/$defs/consumer_requirements"
+    },
+    "root": {
+      "$ref": "#/$defs/virtual_path"
+    },
+    "sources": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/source_record"
+      }
+    },
+    "document_class": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/class_record"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "loaded_classes": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/class_record"
+      }
+    },
+    "packages": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/package_record"
+      }
+    },
+    "inputs": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/input_record"
+      }
+    },
+    "bibliographies": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/bibliography_record"
+      }
+    },
+    "graphics": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/graphic_record"
+      }
+    },
+    "closure": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/resolved_package"
+      }
+    },
+    "unresolved": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/unresolved_record"
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "stage": {
+            "const": "scanned"
+          }
+        },
+        "required": [
+          "stage"
+        ]
+      },
+      "then": {
+        "properties": {
+          "environment": {
+            "maxProperties": 0
+          },
+          "registries": {
+            "maxItems": 0
+          },
+          "consumer_requirements": {
+            "maxProperties": 0
+          },
+          "closure": {
+            "maxItems": 0
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "stage": {
+            "enum": [
+              "resolved",
+              "exact"
+            ]
+          }
+        },
+        "required": [
+          "stage"
+        ]
+      },
+      "then": {
+        "required": [
+          "registries"
+        ],
+        "properties": {
+          "registries": {
+            "minItems": 1,
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/registry"
+                },
+                {
+                  "required": [
+                    "metadata_digest"
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "stage": {
+            "const": "exact"
+          }
+        },
+        "required": [
+          "stage"
+        ]
+      },
+      "then": {
+        "not": {
+          "properties": {
+            "unresolved": {
+              "contains": {
+                "properties": {
+                  "kind": {
+                    "const": "package"
+                  }
+                },
+                "required": [
+                  "kind"
+                ]
+              }
+            }
+          },
+          "required": [
+            "unresolved"
+          ]
+        },
+        "properties": {
+          "closure": {
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/resolved_package"
+                },
+                {
+                  "required": [
+                    "integrity",
+                    "store_key",
+                    "files"
+                  ],
+                  "properties": {
+                    "files": {
+                      "minItems": 1
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "virtual_path": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?![A-Za-z]:)(?!.*\\\\)(?!.*[\\u0000-\\u001F\\u007F])(?!.*(?:^|/)(?:\\.|\\.\\.)(?:/|$))(?!.*//).+$"
+    },
+    "nullable_virtual_path": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/virtual_path"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "string_array": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "location": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "line"
+      ],
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/virtual_path"
+        },
+        "line": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "source_record": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "digest"
+      ],
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/virtual_path"
+        },
+        "digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        }
+      }
+    },
+    "class_record": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "options",
+        "source"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "options": {
+          "$ref": "#/$defs/string_array"
+        },
+        "resolved_path": {
+          "$ref": "#/$defs/virtual_path"
+        },
+        "source": {
+          "$ref": "#/$defs/location"
+        }
+      }
+    },
+    "package_record": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "options",
+        "command",
+        "source"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "options": {
+          "$ref": "#/$defs/string_array"
+        },
+        "command": {
+          "type": "string",
+          "minLength": 1
+        },
+        "resolved_path": {
+          "$ref": "#/$defs/virtual_path"
+        },
+        "source": {
+          "$ref": "#/$defs/location"
+        }
+      }
+    },
+    "input_record": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "name",
+        "resolved_path",
+        "source"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "input",
+            "include",
+            "include-only"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "resolved_path": {
+          "$ref": "#/$defs/nullable_virtual_path"
+        },
+        "source": {
+          "$ref": "#/$defs/location"
+        }
+      }
+    },
+    "bibliography_record": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "name",
+        "resolved_path",
+        "source"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "add-bib-resource",
+            "bibliography",
+            "bibliography-style"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "resolved_path": {
+          "$ref": "#/$defs/nullable_virtual_path"
+        },
+        "source": {
+          "$ref": "#/$defs/location"
+        }
+      }
+    },
+    "graphic_record": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "resolved_path",
+        "source"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "resolved_path": {
+          "$ref": "#/$defs/nullable_virtual_path"
+        },
+        "source": {
+          "$ref": "#/$defs/location"
+        }
+      }
+    },
+    "unresolved_record": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "name",
+        "source"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/location"
+        },
+        "candidates": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "engines": {
+          "$ref": "#/$defs/string_array"
+        }
+      }
+    },
+    "consumer_requirements": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "providers": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_.+-]+$",
+            "maxLength": 255
+          }
+        },
+        "files": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^(?!texmf-dist/)(?!RELOC/)(?!/)(?![A-Za-z]:)(?!.*:)(?!.*\\\\)(?!.*[\\u0000-\\u001F\\u007F])(?!.*(?:^|/)(?:\\.|\\.\\.)(?:/|$))(?!.*//).+$"
+          }
+        }
+      }
+    },
+    "registry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "url"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "const": "tlnet"
+        },
+        "url": {
+          "type": "string",
+          "minLength": 1
+        },
+        "snapshot": {
+          "type": "string"
+        },
+        "metadata_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        }
+      }
+    },
+    "package_source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "registry",
+        "kind",
+        "locator"
+      ],
+      "properties": {
+        "registry": {
+          "type": "string"
+        },
+        "kind": {
+          "const": "registry"
+        },
+        "locator": {
+          "type": "string"
+        },
+        "container_checksum": {
+          "type": "string",
+          "pattern": "^[0-9A-Fa-f]{128}$"
+        },
+        "container_size": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "dependentRequired": {
+        "container_checksum": [
+          "container_size"
+        ],
+        "container_size": [
+          "container_checksum"
+        ]
+      }
+    },
+    "resolved_package": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider",
+        "version",
+        "source",
+        "direct"
+      ],
+      "properties": {
+        "provider": {
+          "type": "string",
+          "minLength": 1
+        },
+        "version": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/package_source"
+        },
+        "satisfies": {
+          "$ref": "#/$defs/string_array"
+        },
+        "integrity": {
+          "type": "string",
+          "pattern": "^sha256-[A-Za-z0-9+/]{43}=$"
+        },
+        "dependencies": {
+          "$ref": "#/$defs/string_array"
+        },
+        "direct": {
+          "type": "boolean"
+        },
+        "requested_by": {
+          "$ref": "#/$defs/string_array"
+        },
+        "store_key": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "engines": {
+          "$ref": "#/$defs/string_array"
+        },
+        "font_maps": {
+          "$ref": "#/$defs/string_array"
+        },
+        "runtime_requests": {
+          "$ref": "#/$defs/string_array"
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/locked_file"
+          }
+        }
+      }
+    },
+    "locked_file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tds_path",
+        "kind"
+      ],
+      "properties": {
+        "tds_path": {
+          "type": "string",
+          "pattern": "^(?!texmf-dist/)(?!RELOC/)(?!/)(?![A-Za-z]:)(?!.*\\\\)(?!.*[\\u0000-\\u001F\\u007F])(?!.*(?:^|/)(?:\\.|\\.\\.)(?:/|$))(?!.*//).+$"
+        },
+        "kind": {
+          "$ref": "#/$defs/resource_kind"
+        }
+      }
+    },
+    "resource_kind": {
+      "enum": [
+        "tex",
+        "bibliography",
+        "font-metric",
+        "virtual-font",
+        "type1-font",
+        "open-type-font",
+        "true-type-font",
+        "font-family",
+        "map",
+        "encoding",
+        "hyphenation",
+        "format",
+        "binary",
+        "data"
+      ]
+    }
+  }
+}

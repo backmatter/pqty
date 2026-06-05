@@ -1,0 +1,9 @@
+name 00texlive.config
+category TLCore
+depend release/2026
+
+name foo
+category Package
+revision 1
+runfiles size=1
+ texmf-dist/tex/latex/foo/foo.sty

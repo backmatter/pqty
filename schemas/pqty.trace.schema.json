@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/backmatter/pqty/main/schemas/pqty.trace.schema.json",
+  "title": "pqty runtime input trace v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "inputs"
+  ],
+  "properties": {
+    "schema": {
+      "const": "pqty.trace/v1"
+    },
+    "producer": {
+      "type": "string"
+    },
+    "environment_fingerprint": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "inputs": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/input"
+      }
+    }
+  },
+  "$defs": {
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requested",
+        "scope"
+      ],
+      "properties": {
+        "requested": {
+          "type": "string",
+          "minLength": 1
+        },
+        "resolved": {
+          "type": "string",
+          "pattern": "^(?!/)(?![A-Za-z]:)(?!.*\\\\)(?!.*[\\u0000-\\u001F\\u007F])(?!.*(?:^|/)(?:\\.|\\.\\.)(?:/|$))(?!.*//).+$"
+        },
+        "scope": {
+          "enum": [
+            "package",
+            "project",
+            "engine",
+            "output"
+          ]
+        },
+        "kind": {
+          "enum": [
+            "tex",
+            "bibliography",
+            "font-metric",
+            "virtual-font",
+            "type1-font",
+            "open-type-font",
+            "true-type-font",
+            "font-family",
+            "map",
+            "encoding",
+            "hyphenation",
+            "format",
+            "binary",
+            "data"
+          ]
+        }
+      }
+    }
+  }
+}

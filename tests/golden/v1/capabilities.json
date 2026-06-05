@@ -1,0 +1,10 @@
+{
+  "schema": "pqty.capabilities/v1",
+  "version": "0.1.0",
+  "lock_schema": "pqty.lock/v1",
+  "environment_schema": "pqty.env/v1",
+  "trace_schema": "pqty.trace/v1",
+  "trace_report_schema": "pqty.trace-report/v1",
+  "convergence_report_schema": "pqty.convergence-report/v1",
+  "progress_schema": "pqty.progress/v1"
+}

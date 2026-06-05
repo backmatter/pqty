@@ -1,0 +1,36 @@
+{
+  "schema": "pqty.env/v1",
+  "fingerprint": "sha256:95ea8e9b9a2b0b5478a49763e115d9adb5f0a66d2f340f235bb28b08bbeb434a",
+  "lock_schema": "pqty.lock/v1",
+  "registries": [
+    {
+      "id": "tlnet",
+      "kind": "tlnet",
+      "url": "https://example.invalid/tlnet",
+      "snapshot": "2026",
+      "metadata_digest": "sha256:11ad00a08483ba8184725800ebef63c7b6c136a9a761c16f11685d84c0c7247b"
+    }
+  ],
+  "requirements": {},
+  "packages": [
+    {
+      "provider": "foo",
+      "version": "tlrev:1",
+      "source": {
+        "registry": "tlnet",
+        "kind": "registry",
+        "locator": "foo"
+      },
+      "integrity": "sha256-MQEk3CiV2g/xobrFSdzB+Bt3UaSRmW6UDIBNN1j3s34=",
+      "direct": true
+    }
+  ],
+  "files": [
+    {
+      "request_name": "foo.sty",
+      "tds_path": "tex/latex/foo/foo.sty",
+      "owner": "foo",
+      "kind": "tex"
+    }
+  ]
+}

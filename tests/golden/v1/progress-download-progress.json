@@ -1,0 +1,9 @@
+{
+  "schema": "pqty.progress/v1",
+  "event": "download-progress",
+  "category": "packages",
+  "item": "latex",
+  "bytes_received": 2500,
+  "bytes_total": 5000,
+  "elapsed_millis": 500
+}

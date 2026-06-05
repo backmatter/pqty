@@ -1,0 +1,185 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/backmatter/pqty/main/schemas/pqty.convergence.schema.json",
+  "title": "pqty convergence report v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "status",
+    "previous_environment_fingerprint",
+    "environment_fingerprint",
+    "added_providers",
+    "matched",
+    "unresolved",
+    "ignored"
+  ],
+  "properties": {
+    "schema": {
+      "const": "pqty.convergence-report/v1"
+    },
+    "status": {
+      "enum": [
+        "stable",
+        "changed",
+        "unresolved"
+      ]
+    },
+    "previous_environment_fingerprint": {
+      "$ref": "#/$defs/fingerprint"
+    },
+    "environment_fingerprint": {
+      "$ref": "#/$defs/fingerprint"
+    },
+    "added_providers": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "matched": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/match"
+      }
+    },
+    "unresolved": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/unresolved"
+      }
+    },
+    "ignored": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/input"
+      }
+    }
+  },
+  "$defs": {
+    "fingerprint": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "match": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requested",
+        "tds_path",
+        "owner"
+      ],
+      "properties": {
+        "requested": {
+          "type": "string",
+          "minLength": 1
+        },
+        "tds_path": {
+          "type": "string",
+          "pattern": "^(?!texmf-dist/)(?!RELOC/)(?!/)(?![A-Za-z]:)(?!.*\\\\)(?!.*[\\u0000-\\u001F\\u007F])(?!.*(?:^|/)(?:\\.|\\.\\.)(?:/|$))(?!.*//).+$"
+        },
+        "owner": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requested"
+      ],
+      "properties": {
+        "requested": {
+          "type": "string",
+          "minLength": 1
+        },
+        "resolved": {
+          "type": "string",
+          "pattern": "^(?!/)(?![A-Za-z]:)(?!.*\\\\)(?!.*[\\u0000-\\u001F\\u007F])(?!.*(?:^|/)(?:\\.|\\.\\.)(?:/|$))(?!.*//).+$"
+        },
+        "scope": {
+          "$ref": "#/$defs/scope"
+        },
+        "kind": {
+          "$ref": "#/$defs/resource_kind"
+        }
+      }
+    },
+    "unresolved": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requested",
+        "reason"
+      ],
+      "properties": {
+        "requested": {
+          "type": "string",
+          "minLength": 1
+        },
+        "resolved": {
+          "type": "string",
+          "pattern": "^(?!/)(?![A-Za-z]:)(?!.*\\\\)(?!.*[\\u0000-\\u001F\\u007F])(?!.*(?:^|/)(?:\\.|\\.\\.)(?:/|$))(?!.*//).+$"
+        },
+        "scope": {
+          "$ref": "#/$defs/scope"
+        },
+        "kind": {
+          "$ref": "#/$defs/resource_kind"
+        },
+        "reason": {
+          "enum": [
+            "invalid-request",
+            "no-provider",
+            "ambiguous-provider",
+            "provider-already-locked",
+            "provider-did-not-satisfy"
+          ]
+        },
+        "candidate": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "candidates": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "scope": {
+      "enum": [
+        "package",
+        "project",
+        "engine",
+        "output"
+      ]
+    },
+    "resource_kind": {
+      "enum": [
+        "tex",
+        "bibliography",
+        "font-metric",
+        "virtual-font",
+        "type1-font",
+        "open-type-font",
+        "true-type-font",
+        "font-family",
+        "map",
+        "encoding",
+        "hyphenation",
+        "format",
+        "binary",
+        "data"
+      ]
+    }
+  }
+}

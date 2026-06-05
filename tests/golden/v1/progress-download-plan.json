@@ -1,0 +1,10 @@
+{
+  "schema": "pqty.progress/v1",
+  "event": "download-plan",
+  "category": "packages",
+  "items_total": 3,
+  "items_cached": 2,
+  "bytes_total": 9000,
+  "bytes_cached": 4000,
+  "bytes_to_download": 5000
+}

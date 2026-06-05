@@ -1,0 +1,61 @@
+{
+  "schema": "pqty.lock/v1",
+  "stage": "exact",
+  "generated_with": "pqty 0.1.0",
+  "registries": [
+    {
+      "id": "tlnet",
+      "kind": "tlnet",
+      "url": "https://example.invalid/tlnet",
+      "snapshot": "2026",
+      "metadata_digest": "sha256:11ad00a08483ba8184725800ebef63c7b6c136a9a761c16f11685d84c0c7247b"
+    }
+  ],
+  "root": "main.tex",
+  "sources": [
+    {
+      "path": "main.tex",
+      "digest": "sha256:9c35c3014c17fb9c58f1b66a85d5e9cf2d8f0dd2bcf71f472c550ff9a52c8015"
+    }
+  ],
+  "document_class": null,
+  "loaded_classes": [],
+  "packages": [
+    {
+      "name": "foo",
+      "options": [],
+      "command": "usepackage",
+      "source": {
+        "path": "main.tex",
+        "line": 1
+      }
+    }
+  ],
+  "inputs": [],
+  "bibliographies": [],
+  "graphics": [],
+  "closure": [
+    {
+      "provider": "foo",
+      "version": "tlrev:1",
+      "source": {
+        "registry": "tlnet",
+        "kind": "registry",
+        "locator": "foo"
+      },
+      "satisfies": [
+        "foo"
+      ],
+      "integrity": "sha256-MQEk3CiV2g/xobrFSdzB+Bt3UaSRmW6UDIBNN1j3s34=",
+      "direct": true,
+      "store_key": "sha256:310124dc2895da0ff1a1bac549dcc1f81b7751a491996e940c804d3758f7b37e",
+      "files": [
+        {
+          "tds_path": "tex/latex/foo/foo.sty",
+          "kind": "tex"
+        }
+      ]
+    }
+  ],
+  "unresolved": []
+}

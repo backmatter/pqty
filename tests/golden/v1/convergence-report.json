@@ -1,0 +1,16 @@
+{
+  "schema": "pqty.convergence-report/v1",
+  "status": "stable",
+  "previous_environment_fingerprint": "sha256:95ea8e9b9a2b0b5478a49763e115d9adb5f0a66d2f340f235bb28b08bbeb434a",
+  "environment_fingerprint": "sha256:95ea8e9b9a2b0b5478a49763e115d9adb5f0a66d2f340f235bb28b08bbeb434a",
+  "added_providers": [],
+  "matched": [
+    {
+      "requested": "foo.sty",
+      "tds_path": "tex/latex/foo/foo.sty",
+      "owner": "foo"
+    }
+  ],
+  "unresolved": [],
+  "ignored": []
+}

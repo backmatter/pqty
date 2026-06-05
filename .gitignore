@@ -1,0 +1,10 @@
+/target/
+*.log
+*.aux
+*.pdf
+!examples/common/figures/box.pdf
+*.synctex.gz
+pqty.lock
+/.agents/
+/.codex/
+/skills-lock.json

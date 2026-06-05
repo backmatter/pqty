@@ -1,0 +1,9 @@
+{
+  "schema": "pqty.progress/v1",
+  "event": "download-start",
+  "category": "packages",
+  "item": "latex",
+  "url": "https://example.invalid/archive/latex.tar.xz",
+  "attempt": 1,
+  "bytes_total": 5000
+}

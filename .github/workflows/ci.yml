@@ -1,0 +1,173 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_INCREMENTAL: "0"
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rust:
+    name: Rust (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+          - windows-latest
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Show pinned toolchain
+        run: rustup show active-toolchain
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Lint all targets
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Run tests
+        run: cargo test --workspace --locked
+
+      - name: Build documentation
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --workspace --no-deps --locked
+
+  tex-acceptance:
+    name: TeX acceptance (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PQTY_XTASK_REMOTE: "2026-07-26"
+      TEXLIVE_INSTALLER_SHA256: bf28c57398760416f433777f86cfa649cdee0cd6edb42ddf258e91daad91893a
+      TEXLIVE_REPOSITORY: https://texlive.info/tlnet-archive/2026/07/26/tlnet
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Restore TeX Live
+        id: texlive-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/texlive
+          key: texlive-linux-x86_64-2026-2026-07-26-acceptance-v1
+
+      - name: Install TeX Live
+        if: steps.texlive-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          installer_dir="$RUNNER_TEMP/install-texlive"
+          installer_archive="$RUNNER_TEMP/install-tl-unx.tar.gz"
+          profile="$RUNNER_TEMP/texlive.profile"
+          mkdir --parents "$installer_dir"
+          curl \
+            --fail \
+            --location \
+            --retry 3 \
+            --retry-all-errors \
+            --output "$installer_archive" \
+            "$TEXLIVE_REPOSITORY/install-tl-unx.tar.gz"
+          printf '%s  %s\n' \
+            "$TEXLIVE_INSTALLER_SHA256" \
+            "$installer_archive" |
+            sha256sum --check -
+          tar \
+            --extract \
+            --file "$installer_archive" \
+            --gzip \
+            --directory "$installer_dir" \
+            --strip-components=1
+          printf '%s\n' \
+            "selected_scheme scheme-infraonly" \
+            "TEXDIR $HOME/texlive" \
+            "TEXMFCONFIG $HOME/.texlive/texmf-config" \
+            "TEXMFHOME $HOME/texmf" \
+            "TEXMFLOCAL $HOME/texlive/texmf-local" \
+            "TEXMFSYSCONFIG $HOME/texlive/texmf-config" \
+            "TEXMFSYSVAR $HOME/texlive/texmf-var" \
+            "TEXMFVAR $HOME/texlive/texmf-var" \
+            "option_doc 0" \
+            "option_src 0" \
+            > "$profile"
+          "$installer_dir/install-tl" \
+            --profile="$profile" \
+            --repository="$TEXLIVE_REPOSITORY"
+          export PATH="$HOME/texlive/bin/x86_64-linux:$PATH"
+          "$HOME/texlive/bin/x86_64-linux/tlmgr" \
+            option repository "$TEXLIVE_REPOSITORY"
+          "$HOME/texlive/bin/x86_64-linux/tlmgr" option autobackup 0
+          "$HOME/texlive/bin/x86_64-linux/tlmgr" install \
+            latex-bin \
+            xetex \
+            bibtex \
+            biber \
+            amsfonts \
+            xcolor
+          "$HOME/texlive/bin/x86_64-linux/luaotfload-tool" --update --force
+
+      - name: Save TeX Live
+        if: steps.texlive-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/texlive
+          key: ${{ steps.texlive-cache.outputs.cache-primary-key }}
+
+      - name: Add TeX Live to PATH
+        shell: bash
+        run: echo "$HOME/texlive/bin/x86_64-linux" >> "$GITHUB_PATH"
+
+      - name: Verify common project
+        run: cargo xtask tex common
+
+      - name: Verify Runtime Convergence
+        run: cargo xtask tex convergence
+
+      - name: Verify five-project corpus
+        run: cargo xtask tex corpus
+
+      - name: Upload corpus metrics
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: corpus-metrics
+          path: target/corpus-metrics.json
+
+  dependency-policy:
+    name: Dependency security, licenses, and sources
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check dependency policy
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          rust-version: "1.89.0"

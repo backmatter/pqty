@@ -1,0 +1,5 @@
+name safe
+containerchecksum abc
+containersize many
+runfiles size=1
+ RELOC/tex/a.sty

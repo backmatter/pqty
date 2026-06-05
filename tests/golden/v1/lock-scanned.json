@@ -1,0 +1,29 @@
+{
+  "schema": "pqty.lock/v1",
+  "stage": "scanned",
+  "generated_with": "pqty 0.1.0",
+  "root": "main.tex",
+  "sources": [
+    {
+      "path": "main.tex",
+      "digest": "sha256:9c35c3014c17fb9c58f1b66a85d5e9cf2d8f0dd2bcf71f472c550ff9a52c8015"
+    }
+  ],
+  "document_class": null,
+  "loaded_classes": [],
+  "packages": [
+    {
+      "name": "foo",
+      "options": [],
+      "command": "usepackage",
+      "source": {
+        "path": "main.tex",
+        "line": 1
+      }
+    }
+  ],
+  "inputs": [],
+  "bibliographies": [],
+  "graphics": [],
+  "unresolved": []
+}
