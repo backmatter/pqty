@@ -2,7 +2,7 @@
 allow_dirty = false
 changelog_update = false
 dependencies_update = false
-git_only = true
+git_only = false
 git_release_enable = false
 git_tag_enable = false
 git_tag_name = "v{{ version }}"
