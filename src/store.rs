@@ -213,6 +213,30 @@ pub(crate) fn byte_source(
     }
 }
 
+/// Check current local package bytes before reusing a resolved closure. Store
+/// manifests remain integrity-checked, and installation still verifies objects.
+pub(crate) fn local_source_matches_lock(
+    lock: &crate::LockFile,
+    source: &PackageByteSource,
+    store: &Path,
+) -> bool {
+    use sha2::{Digest as _, Sha256};
+    let PackageByteSource::Local { texmf_root } = source else {
+        return false;
+    };
+    lock.closure.iter().all(|entry| {
+        let Ok(manifest) = object::load_store_manifest(store, entry) else {
+            return false;
+        };
+        manifest.files.iter().all(|file| {
+            let path = texmf_root.join(normalize_runfile(&file.tds_path).0);
+            http::read_file_bounded(&path, MAX_ARCHIVE_ENTRY_BYTES).is_ok_and(|bytes| {
+                file.digest == format!("sha256:{}", hex::encode(Sha256::digest(bytes)))
+            })
+        })
+    })
+}
+
 /// Normalize a tlpdb runfile into its installed-source path
 /// (`texmf-dist/...`) and portable TDS path. Relocated tlnet packages use a
 /// `RELOC/` prefix and store bare TDS paths in their containers. Non-relocated

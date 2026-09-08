@@ -44,7 +44,7 @@ the adapter fails when a native path cannot be converted losslessly.
 `--environment` is optional but recommended. It reads only the schema and
 fingerprint from a `pqty.env/v1` JSON document, keeping this crate independent
 of pqty's Rust implementation while allowing stale traces to be rejected.
-Generate one with `pqty env --lock pqty.lock > pqty.env.json`.
+Generate one with `pqty env --lock pqty.lock --output pqty.env.json`.
 `--environment-fingerprint` is available when a caller already has the value.
 
 The adapter reads only `INPUT` records. `OUTPUT` records are not dependencies;
@@ -54,3 +54,6 @@ under the declared output root.
 Without `--output`, the JSON trace is written to stdout. Diagnostics go to
 stderr, and invalid arguments or ambiguous, unmapped, or unrepresentable paths
 fail the command.
+
+The CLI limits each recorder and environment input to 64 MiB and requires
+UTF-8. An oversized or invalid input fails before replacing an existing trace.

@@ -153,12 +153,17 @@ one writer and ensure the destination is not being read while it is replaced.
 ### `env`
 
 ```text
-pqty env [--lock <PATH>]
+pqty env [--lock <PATH>] [-o, --output <PATH>]
 ```
 
 Prints the deterministic `pqty.env/v1` projection of an exact lock. The
 default lock path is `pqty.lock`. The environment fingerprint is suitable for
 renderer cache keys.
+
+Use `--output pqty.env.json` to write the environment atomically instead of
+printing it. The parent directory must exist. A failed read, validation, or
+write leaves an existing output file intact. Successful file output is silent;
+without `--output`, stdout remains the same versioned JSON document.
 
 ### `require`
 

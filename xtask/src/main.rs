@@ -1,3 +1,5 @@
+//! Repository maintenance and TeX integration checks for pqty.
+
 mod command;
 mod tex;
 
