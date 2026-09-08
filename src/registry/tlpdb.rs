@@ -1,4 +1,5 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -37,6 +38,73 @@ pub struct TlpdbIndex {
     pub(crate) origin: Option<String>,
 }
 
+// Scan each directory once, including absent directories. This cache lives
+// only for one registry load: installs and removals are observed next time.
+struct InstalledFiles {
+    directories: HashMap<PathBuf, Option<HashSet<OsString>>>,
+    remaining_entries: usize,
+}
+
+impl Default for InstalledFiles {
+    fn default() -> Self {
+        Self {
+            directories: HashMap::new(),
+            remaining_entries: MAX_CLOSURE_RUNFILES,
+        }
+    }
+}
+
+impl InstalledFiles {
+    fn contains(&mut self, path: &Path) -> bool {
+        let (Some(parent), Some(name)) = (path.parent(), path.file_name()) else {
+            return path.is_file();
+        };
+        let remaining = &mut self.remaining_entries;
+        let files = self
+            .directories
+            .entry(parent.to_path_buf())
+            .or_insert_with(|| {
+                let files = installed_directory_files(parent, *remaining);
+                if let Some(files) = &files {
+                    *remaining -= files.len();
+                }
+                files
+            });
+        files
+            .as_ref()
+            .map_or_else(|| path.is_file(), |files| files.contains(name))
+    }
+}
+
+fn installed_directory_files(directory: &Path, limit: usize) -> Option<HashSet<OsString>> {
+    let entries = match fs::read_dir(directory) {
+        Ok(entries) => entries,
+        Err(error)
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+            ) =>
+        {
+            return Some(HashSet::new());
+        }
+        // A directory may be searchable but not listable. Preserve the
+        // per-file lookup in that case, and on incomplete directory reads.
+        Err(_) => return None,
+    };
+    let mut files = HashSet::new();
+    for (number, entry) in entries.enumerate() {
+        if number >= limit {
+            return None;
+        }
+        let entry = entry.ok()?;
+        let kind = entry.file_type().ok()?;
+        if kind.is_file() || (kind.is_symlink() && entry.path().is_file()) {
+            files.insert(entry.file_name());
+        }
+    }
+    Some(files)
+}
+
 #[derive(Default)]
 struct TlpdbRecord {
     name: Option<String>,
@@ -62,6 +130,7 @@ struct TlpdbContents {
 fn finish_tlpdb_record(
     record: &mut TlpdbRecord,
     contents: &mut TlpdbContents,
+    index_files: bool,
 ) -> Result<(), PqtyError> {
     if !record.saw_content {
         return Ok(());
@@ -71,12 +140,14 @@ fn finish_tlpdb_record(
     })?;
     validate_tlpdb_record(record, &current, &contents.packages)?;
     update_release(record, &current, &mut contents.release)?;
-    index_runfiles(
-        record,
-        &current,
-        &mut contents.by_file,
-        &mut contents.by_path,
-    );
+    if index_files {
+        index_runfiles(
+            record,
+            &current,
+            &mut contents.by_file,
+            &mut contents.by_path,
+        );
+    }
     insert_package(record, current, &mut contents.packages);
     *record = TlpdbRecord::default();
     Ok(())
@@ -224,7 +295,7 @@ fn insert_package(
     );
 }
 
-fn parse_tlpdb_contents(text: &str) -> Result<TlpdbContents, PqtyError> {
+fn parse_tlpdb_contents(text: &str, index_files: bool) -> Result<TlpdbContents, PqtyError> {
     let mut contents = TlpdbContents::default();
     let mut record = TlpdbRecord::default();
     let mut total_runfiles = 0_usize;
@@ -238,7 +309,7 @@ fn parse_tlpdb_contents(text: &str) -> Result<TlpdbContents, PqtyError> {
             )));
         }
         if line.is_empty() {
-            finish_tlpdb_record(&mut record, &mut contents)?;
+            finish_tlpdb_record(&mut record, &mut contents, index_files)?;
             continue;
         }
         record.saw_content = true;
@@ -345,6 +416,18 @@ impl TlpdbIndex {
     ///
     /// Returns an error when the database cannot be read.
     pub fn load(path: &Path) -> Result<Self, PqtyError> {
+        Self::load_with_file_index(path, true)
+    }
+
+    pub(crate) fn load_installed(path: &Path) -> Result<Self, PqtyError> {
+        // The installed subset replaces the ownership indexes. Avoid building
+        // and discarding indexes for the entire upstream distribution first.
+        let mut index = Self::load_with_file_index(path, false)?;
+        index.retain_installed_runfiles();
+        Ok(index)
+    }
+
+    fn load_with_file_index(path: &Path, index_files: bool) -> Result<Self, PqtyError> {
         let file = fs::File::open(path).map_err(|source| PqtyError::Io {
             path: path.to_path_buf(),
             source,
@@ -356,7 +439,7 @@ impl TlpdbIndex {
                 path.display()
             ))
         })?;
-        Self::try_parse(&text, path)
+        Self::parse_with_file_index(&text, path, index_files)
     }
 
     /// Fetch and cache a tlnet package database, preserving its remote origin
@@ -383,9 +466,18 @@ impl TlpdbIndex {
         Self::try_parse(text, source).expect("valid tlpdb fixture")
     }
 
+    #[cfg(test)]
     pub(crate) fn try_parse(text: &str, source: &Path) -> Result<Self, PqtyError> {
+        Self::parse_with_file_index(text, source, true)
+    }
+
+    fn parse_with_file_index(
+        text: &str,
+        source: &Path,
+        index_files: bool,
+    ) -> Result<Self, PqtyError> {
         let metadata_digest = format!("sha256:{}", hex::encode(Sha256::digest(text.as_bytes())));
-        let mut contents = parse_tlpdb_contents(text)?;
+        let mut contents = parse_tlpdb_contents(text, index_files)?;
         normalize_provider_indexes(
             &contents.packages,
             &mut contents.by_file,
@@ -431,10 +523,11 @@ impl TlpdbIndex {
         let Some(texmf_root) = self.texmf_root.as_ref() else {
             return;
         };
+        let mut installed = InstalledFiles::default();
         for package in self.packages.values_mut() {
             package.runfiles.retain(|runfile| {
                 let (placement, _) = normalize_runfile(runfile);
-                texmf_root.join(placement).is_file()
+                installed.contains(&texmf_root.join(placement))
             });
             package.font_maps.retain(|map_name| {
                 package.runfiles.iter().any(|runfile| {
@@ -670,3 +763,66 @@ pub(crate) fn locate_tlpdb() -> Option<PathBuf> {
 }
 
 // ---------------------------------------------------------------------------
+
+#[cfg(all(test, unix))]
+mod installed_files_tests {
+    use super::InstalledFiles;
+    use std::fs;
+    use std::os::unix::fs::{PermissionsExt, symlink};
+
+    #[test]
+    fn directory_snapshot_matches_file_lookup_for_links_and_special_paths() {
+        let root = crate::tests::temporary_test_root("installed-file-types");
+        fs::create_dir_all(root.join("directory.sty")).unwrap();
+        fs::write(root.join("file.sty"), "package").unwrap();
+        symlink("file.sty", root.join("link.sty")).unwrap();
+        symlink("absent", root.join("broken.sty")).unwrap();
+        symlink("directory.sty", root.join("directory-link.sty")).unwrap();
+        symlink(".", root.join("alias")).unwrap();
+        let mut installed = InstalledFiles::default();
+        for relative in [
+            "file.sty",
+            "link.sty",
+            "broken.sty",
+            "directory.sty",
+            "directory-link.sty",
+            "absent.sty",
+            "missing/absent.sty",
+            "alias/file.sty",
+            "file.sty/not-a-directory.sty",
+        ] {
+            let path = root.join(relative);
+            assert_eq!(installed.contains(&path), path.is_file(), "{relative}");
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn exhausted_directory_budget_falls_back_to_file_lookup() {
+        let root = crate::tests::temporary_test_root("installed-directory-budget");
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("package.sty");
+        fs::write(&path, "package").unwrap();
+        let mut installed = InstalledFiles {
+            remaining_entries: 0,
+            ..InstalledFiles::default()
+        };
+        assert!(installed.contains(&path));
+        assert!(!installed.contains(&root.join("missing.sty")));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn searchable_unlistable_directory_falls_back_to_file_lookup() {
+        let root = crate::tests::temporary_test_root("installed-unlistable-directory");
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("package.sty");
+        fs::write(&path, "package").unwrap();
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o111)).unwrap();
+        let expected = path.is_file();
+        let actual = InstalledFiles::default().contains(&path);
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
+        fs::remove_dir_all(root).unwrap();
+        assert_eq!(actual, expected);
+    }
+}

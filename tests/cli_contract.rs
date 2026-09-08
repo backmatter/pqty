@@ -246,3 +246,169 @@ fn direct_usage_errors_do_not_repeat_the_command_name() {
     make_tree_writable(&root);
     fs::remove_dir_all(root).expect("remove temporary root");
 }
+
+#[test]
+fn environment_export_is_atomic_and_matches_stdout() {
+    let (root, tlpdb) = create_fixture();
+    let (exact_lock, _) = run_resolution_commands(&root, &tlpdb);
+    let destination = root.join("environment.json");
+    fs::write(&destination, b"previous environment").expect("previous environment");
+    let stdout = run_ok(pqty(&root).arg("env").arg("--lock").arg(&exact_lock)).stdout;
+    let output = run_ok(
+        pqty(&root)
+            .arg("env")
+            .arg("--lock")
+            .arg(&exact_lock)
+            .arg("--output")
+            .arg(&destination),
+    );
+    assert!(output.stdout.is_empty());
+    assert_eq!(fs::read(&destination).expect("export"), stdout);
+
+    let invalid_lock = root.join("invalid.lock");
+    fs::write(&invalid_lock, b"{}").expect("invalid lock");
+    let failure = pqty(&root)
+        .arg("env")
+        .arg("--lock")
+        .arg(&invalid_lock)
+        .arg("-o")
+        .arg(&destination)
+        .output()
+        .expect("run pqty");
+    assert!(!failure.status.success());
+    assert!(failure.stdout.is_empty());
+    assert_eq!(fs::read(&destination).expect("previous export"), stdout);
+
+    let output_directory = root.join("output-directory");
+    fs::create_dir(&output_directory).expect("output directory");
+    fs::write(output_directory.join("keep"), b"owned data").expect("existing data");
+    let failure = pqty(&root)
+        .arg("env")
+        .arg("--lock")
+        .arg(&exact_lock)
+        .arg("-o")
+        .arg(&output_directory)
+        .output()
+        .expect("run pqty");
+    assert!(!failure.status.success());
+    assert_eq!(
+        fs::read(output_directory.join("keep")).expect("preserved data"),
+        b"owned data"
+    );
+    assert!(!fs::read_dir(&root).expect("directory").any(|entry| {
+        entry
+            .expect("entry")
+            .file_name()
+            .to_string_lossy()
+            .contains(".pqty-write-")
+    }));
+    make_tree_writable(&root);
+    fs::remove_dir_all(root).expect("cleanup");
+}
+
+fn lock_local_fixture(root: &Path, tlpdb: &Path) -> Output {
+    run_ok(
+        pqty(root)
+            .args(["--offline", "lock", "main.tex"])
+            .arg("--tlpdb")
+            .arg(tlpdb)
+            .arg("--store")
+            .arg(root.join("store"))
+            .arg("--output")
+            .arg(root.join("pqty.lock")),
+    )
+}
+
+fn fixture_lock(root: &Path) -> serde_json::Value {
+    serde_json::from_slice(&fs::read(root.join("pqty.lock")).unwrap()).unwrap()
+}
+
+#[test]
+fn local_lock_reuse_checks_source_bytes_metadata_and_requirements() {
+    let (root, tlpdb) = create_fixture();
+    lock_local_fixture(&root, &tlpdb);
+    let first = fixture_lock(&root);
+    fs::write(root.join("main.tex"), br"\usepackage{foo} changed prose").unwrap();
+    let refreshed = lock_local_fixture(&root, &tlpdb);
+    assert!(String::from_utf8_lossy(&refreshed.stdout).contains("refreshed"));
+    let second = fixture_lock(&root);
+    assert_eq!(first["closure"], second["closure"]);
+    assert_ne!(first["sources"], second["sources"]);
+
+    // Same length and timestamp: source-byte validation must still miss.
+    let package = root.join("texmf-dist/tex/latex/foo/foo.sty");
+    let modified = fs::metadata(&package).unwrap().modified().unwrap();
+    fs::write(&package, b"% bar").unwrap();
+    fs::OpenOptions::new()
+        .write(true)
+        .open(&package)
+        .unwrap()
+        .set_times(fs::FileTimes::new().set_modified(modified))
+        .unwrap();
+    let changed = lock_local_fixture(&root, &tlpdb);
+    assert!(String::from_utf8_lossy(&changed.stdout).contains("wrote"));
+    let third = fixture_lock(&root);
+    assert_ne!(
+        second["closure"][0]["integrity"],
+        third["closure"][0]["integrity"]
+    );
+
+    let metadata = fs::read_to_string(&tlpdb)
+        .unwrap()
+        .replace("revision 1", "revision 3");
+    fs::write(&tlpdb, metadata).unwrap();
+    lock_local_fixture(&root, &tlpdb);
+    let fourth = fixture_lock(&root);
+    assert_ne!(third["registries"], fourth["registries"]);
+    assert_eq!(fourth["closure"][0]["version"], "tlrev:3");
+
+    fs::write(root.join("main.tex"), br"\usepackage{foo,baz}").unwrap();
+    lock_local_fixture(&root, &tlpdb);
+    assert_eq!(fixture_lock(&root)["closure"].as_array().unwrap().len(), 2);
+
+    fs::remove_file(&package).unwrap();
+    let removed = pqty(&root)
+        .args(["--offline", "lock", "main.tex"])
+        .arg("--tlpdb")
+        .arg(&tlpdb)
+        .arg("--store")
+        .arg(root.join("store"))
+        .arg("--output")
+        .arg(root.join("pqty.lock"))
+        .output()
+        .unwrap();
+    assert!(
+        !removed.status.success(),
+        "removed provider must not reuse its old lock"
+    );
+    make_tree_writable(&root);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn reused_local_lock_does_not_bypass_store_verification() {
+    use sha2::{Digest as _, Sha256};
+    let (root, tlpdb) = create_fixture();
+    lock_local_fixture(&root, &tlpdb);
+    let digest = hex::encode(Sha256::digest(b"% foo"));
+    let object = root.join("store").join(&digest[..2]).join(&digest);
+    make_writable(&object);
+    fs::write(&object, b"% bad").unwrap();
+    let reused = lock_local_fixture(&root, &tlpdb);
+    assert!(String::from_utf8_lossy(&reused.stdout).contains("current"));
+    let install = pqty(&root)
+        .args(["--offline", "install", "--link", "copy"])
+        .arg("--lock")
+        .arg(root.join("pqty.lock"))
+        .arg("--store")
+        .arg(root.join("store"))
+        .arg("--out")
+        .arg(root.join("out"))
+        .output()
+        .unwrap();
+    assert!(!install.status.success());
+    assert!(String::from_utf8_lossy(&install.stderr).contains("corrupt"));
+    assert!(!root.join("out/tex/latex/foo/foo.sty").exists());
+    make_tree_writable(&root);
+    fs::remove_dir_all(root).unwrap();
+}

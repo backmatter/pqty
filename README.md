@@ -4,38 +4,12 @@
 exact files, and installs those files into a package tree that a TeX renderer
 can use reproducibly.
 
-> **Want to build a LaTeX document and get a PDF?** Use
-> [texe](https://github.com/backmatter/texe), the user-facing workflow that
-> bundles pqty, manages the TeX engine and supporting tools, and produces the
-> PDF.
-
-Use pqty directly when building or integrating a renderer, editor, CI service,
-or other tool that needs a verified LaTeX package environment. pqty does not
-run a TeX engine, schedule compilation passes, invoke bibliography tools, or
-produce a PDF.
-
-## Key terms
-
-- **TeX Live snapshot:** the package catalog from one published date. A dated
-  snapshot prevents package selection from changing later.
-- **Lock:** `pqty.lock`, a JSON file recording the selected snapshot, packages,
-  files, and integrity data.
-- **Store:** a shared local cache of verified package files.
-- **TEXMF tree:** the standard directory layout through which a TeX engine
-  finds packages, classes, fonts, and bibliography styles.
-
-```text
-LaTeX source
-    -> pqty.lock
-    -> verified package store
-    -> TEXMF tree + pqty.env.json
-    -> renderer or build system
-```
+Use [texe](https://github.com/backmatter/texe) to build a paper and produce a
+PDF. Its release bundles pqty and pqty-fls alongside the managed TeX engine.
+Use pqty directly to integrate package management into a renderer, editor, or
+CI service.
 
 ## Install standalone pqty
-
-Most LaTeX authors should install [texe](https://github.com/backmatter/texe);
-its command suite already includes `pqty` and `pqty-fls`.
 
 For standalone use, download the archive for your platform from
 [GitHub Releases](https://github.com/backmatter/pqty/releases):
@@ -45,11 +19,8 @@ For standalone use, download the archive for your platform from
 3. Extract it and place its directory, or the executables, on your `PATH`.
 4. Run `pqty --version`.
 
-The archive contains:
-
-- `pqty`, the package manager used in the quick start below;
-- `pqty-fls`, an optional adapter for tools that consume TeX `.fls` recorder
-  files.
+The archive includes `pqty` and `pqty-fls`, the adapter for TeX `.fls`
+recorder files.
 
 On Linux, run this in the directory containing the downloaded files:
 
@@ -90,9 +61,6 @@ The repository pins its minimum supported toolchain in
 
 ## Quick start
 
-These steps create a package environment; they do not require a local TeX Live
-installation or produce a PDF.
-
 Save this as `main.tex`:
 
 ```tex
@@ -115,22 +83,13 @@ Install the locked packages and emit the environment description:
 
 ```sh
 pqty install --lock pqty.lock -d .pqty/texmf
-pqty env --lock pqty.lock > pqty.env.json
+pqty env --lock pqty.lock --output pqty.env.json
 ```
 
-You now have:
-
-- `pqty.lock`: the reproducibility record to commit with the project;
-- `.pqty/texmf`: a generated package tree to mount in a renderer;
-- `pqty.env.json`: generated integration metadata, including the environment
-  fingerprint used for cache keys.
-
-Normally, commit `pqty.lock`; regenerate the TEXMF tree and environment JSON
-when needed.
-
-At this point pqty's standalone job is complete. Use
-[texe](https://github.com/backmatter/texe) for a source-to-PDF workflow, or
-configure your renderer to search `.pqty/texmf` before fallback package roots.
+Commit `pqty.lock`, which records the snapshot, packages, files, and integrity
+data. The generated `.pqty/texmf` tree contains the installed package files;
+`pqty.env.json` describes the environment and its cache fingerprint. Configure
+your renderer to search this tree before fallback package roots.
 
 Inspect what pqty discovered without changing the project:
 
@@ -176,6 +135,7 @@ ambient configuration cannot alter a build.
 
 ## Renderer integration
 
+pqty manages packages; the caller owns the engine, build passes, and PDF output.
 A renderer or build system:
 
 1. negotiates schemas with `pqty --no-config capabilities`;
@@ -213,8 +173,8 @@ Current limits:
 
 - scanning is conservative rather than a TeX interpreter;
 - TeX Live `tlpdb` is the only built-in registry backend;
-- engine binaries, formats, configuration, external tools, system fonts,
-  compilation passes, and PDF reproducibility remain outside pqty;
+- environment fingerprints cover packages, not engine binaries, formats,
+  external tools, or system fonts;
 - lock and trace JSON inputs are limited to 64 MiB;
 - symlink and hardlink installations are experimental.
 

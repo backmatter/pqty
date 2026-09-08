@@ -1,8 +1,8 @@
-//! Versioned, line-delimited progress events for process Consumers.
+//! Versioned, line-delimited progress events for process consumers.
 //!
 //! Progress is an advisory CLI stream, kept on stderr so Artifact Protocol
 //! documents on stdout remain unchanged. The default human mode is useful for
-//! direct pqty invocations; Consumers request JSON explicitly and negotiate
+//! direct pqty invocations; consumers request JSON explicitly and negotiate
 //! `pqty.progress/v1` through `pqty.capabilities/v1`.
 
 use std::cell::Cell;
@@ -255,8 +255,8 @@ fn emit_human(event: &ProgressEvent<'_>) {
 
 const fn category_label(category: DownloadCategory) -> &'static str {
     match category {
-        DownloadCategory::Registry => "Registry Snapshot",
-        DownloadCategory::Packages => "Package containers",
+        DownloadCategory::Registry => "registry snapshot",
+        DownloadCategory::Packages => "packages",
     }
 }
 
@@ -270,10 +270,9 @@ fn human_plan_message(
 ) -> String {
     match (bytes_total, bytes_cached, bytes_to_download) {
         (Some(total), Some(_), Some(0)) => format!(
-            "{label}: all {}, {}, {} cached",
+            "{label}: {} ({}) cached",
             count_noun(items_total, "item", "items"),
             human_bytes(total),
-            if items_total == 1 { "is" } else { "are" }
         ),
         (Some(total), Some(cached), Some(download)) => format!(
             "{label}: {} to download across {}; {} of {} cached",
@@ -282,7 +281,7 @@ fn human_plan_message(
             human_bytes(cached),
             human_bytes(total)
         ),
-        _ => format!("{label}: download size is not declared by the server"),
+        _ => format!("{label}: download size unknown"),
     }
 }
 

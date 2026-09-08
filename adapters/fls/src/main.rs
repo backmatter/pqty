@@ -1,10 +1,12 @@
 use std::fs;
-use std::io::Write as _;
+use std::io::{Read, Write as _};
 use std::path::{Path, PathBuf};
 
 use clap::Parser;
 use pqty_fls::{AdapterError, RootMapping, TraceScope, adapt_fls};
 use serde::Deserialize;
+
+const MAX_INPUT_BYTES: u64 = 64 * 1024 * 1024;
 
 const ENVIRONMENT_SCHEMA: &str = "pqty.env/v1";
 
@@ -73,10 +75,7 @@ fn run(cli: Cli) -> Result<(), AdapterError> {
 
     let fingerprint = match cli.environment {
         Some(path) => {
-            let text = fs::read_to_string(&path).map_err(|source| AdapterError::Io {
-                path: path.clone(),
-                source,
-            })?;
+            let text = read_text(&path)?;
             let environment: EnvironmentIdentity = serde_json::from_str(&text)?;
             if environment.schema != ENVIRONMENT_SCHEMA {
                 return Err(AdapterError::Usage(format!(
@@ -88,10 +87,7 @@ fn run(cli: Cli) -> Result<(), AdapterError> {
         }
         None => cli.environment_fingerprint,
     };
-    let contents = fs::read_to_string(&cli.fls).map_err(|source| AdapterError::Io {
-        path: cli.fls.clone(),
-        source,
-    })?;
+    let contents = read_text(&cli.fls)?;
     let trace = adapt_fls(
         &contents,
         &project.root,
@@ -110,6 +106,33 @@ fn run(cli: Cli) -> Result<(), AdapterError> {
                 source,
             }),
     }
+}
+
+fn read_text(path: &Path) -> Result<String, AdapterError> {
+    let file = fs::File::open(path).map_err(|source| AdapterError::Io {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    read_text_bounded(file, path, MAX_INPUT_BYTES)
+}
+
+fn read_text_bounded(reader: impl Read, path: &Path, limit: u64) -> Result<String, AdapterError> {
+    let mut bytes = Vec::new();
+    reader
+        .take(limit.saturating_add(1))
+        .read_to_end(&mut bytes)
+        .map_err(|source| AdapterError::Io {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    if bytes.len() as u64 > limit {
+        return Err(AdapterError::Usage(format!(
+            "input {} exceeds the supported {limit} byte limit",
+            path.display()
+        )));
+    }
+    String::from_utf8(bytes)
+        .map_err(|_| AdapterError::Usage(format!("input {} is not valid UTF-8", path.display())))
 }
 
 fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), AdapterError> {
@@ -160,4 +183,29 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), AdapterError> {
         let _ = fs::remove_file(&temporary);
     }
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Cursor;
+    use std::path::Path;
+
+    #[test]
+    fn input_reads_accept_the_limit_and_reject_oversized_or_non_utf8_data() {
+        let path = Path::new("main.fls");
+        assert_eq!(
+            super::read_text_bounded(Cursor::new(b"INPUT"), path, 5).expect("exact limit"),
+            "INPUT"
+        );
+        let mut reader = Cursor::new(b"INPUT main.tex");
+        let error = super::read_text_bounded(&mut reader, path, 5).expect_err("oversized input");
+        assert_eq!(reader.position(), 6, "must stop reading at limit + 1");
+        assert!(error.to_string().contains("main.fls"));
+        assert!(
+            super::read_text_bounded(Cursor::new([0xff]), path, 5)
+                .expect_err("non-UTF8 input")
+                .to_string()
+                .contains("UTF-8")
+        );
+    }
 }

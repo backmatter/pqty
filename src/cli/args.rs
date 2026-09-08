@@ -209,6 +209,9 @@ pub(super) enum Command {
         /// Fully materialized lockfile.
         #[arg(long, default_value = "pqty.lock")]
         lock: PathBuf,
+        /// Atomically write the environment to a file instead of stdout.
+        #[arg(short, long)]
+        output: Option<PathBuf>,
     },
     /// Reconcile a generic runtime input trace with a locked environment.
     CheckTrace {

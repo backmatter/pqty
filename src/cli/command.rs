@@ -212,16 +212,27 @@ fn run_lock(context: &ExecutionContext, command: Command) -> Result<(), PqtyErro
     ) {
         return publish_refreshed_lock(&lock, &output);
     }
-    let mut lock = scanned;
     let index = load_tlpdb_index(tlpdb, registry.as_ref())?;
     if let Some(expected) = tlpdb_sha256.as_deref() {
         validate_tlpdb_digest(&index, expected)?;
     }
+    let source = byte_source(registry.as_ref(), &index)?;
+    let store = context.config.store_dir(store);
+    if let Some(refreshed) = refresh_local_lock(
+        &scanned,
+        &output,
+        &index,
+        &source,
+        &store,
+        &consumer_requirements,
+    ) {
+        return publish_refreshed_lock(&refreshed, &output);
+    }
+    let mut lock = scanned;
     resolve(&mut lock, &index);
     require_runtime(&mut lock, &index, &required_files, &required_providers)?;
     fail_on_unresolved_packages(&lock)?;
-    let source = byte_source(registry.as_ref(), &index)?;
-    hydrate_lock(&mut lock, &index, &source, &context.config.store_dir(store))?;
+    hydrate_lock(&mut lock, &index, &source, &store)?;
     ResolvedEnvironment::from_lock(&lock)?;
     write_lock(&output, &lock)?;
     println!("wrote {}", output.display());
@@ -239,11 +250,24 @@ fn publish_refreshed_lock(lock: &LockFile, output: &Path) -> Result<(), PqtyErro
 }
 
 fn run_env(command: Command) -> Result<(), PqtyError> {
-    let Command::Env { lock } = command else {
+    let Command::Env { lock, output } = command else {
         unreachable!("env handler received another command");
     };
     let environment = ResolvedEnvironment::from_lock(&read_lock(&lock)?)?;
-    println!("{}", serde_json::to_string_pretty(&environment)?);
+    let mut bytes = serde_json::to_vec_pretty(&environment)?;
+    bytes.push(b'\n');
+    if let Some(output) = output {
+        crate::atomic_write(&output, &bytes)?;
+    } else {
+        use std::io::Write as _;
+        std::io::stdout()
+            .lock()
+            .write_all(&bytes)
+            .map_err(|source| PqtyError::Io {
+                path: PathBuf::from("<stdout>"),
+                source,
+            })?;
+    }
     Ok(())
 }
 
@@ -385,6 +409,31 @@ pub(super) fn refresh_existing_lock(
         return None;
     }
 
+    Some(refresh_project_records(existing, scanned))
+}
+
+fn refresh_local_lock(
+    scanned: &LockFile,
+    output: &Path,
+    index: &crate::TlpdbIndex,
+    source: &crate::PackageByteSource,
+    store: &Path,
+    requirements: &ConsumerRequirements,
+) -> Option<LockFile> {
+    use crate::PackageRegistry as _;
+    let existing = read_lock(output).ok()?;
+    if validate_materialized_lock(&existing).is_err()
+        || existing.registries != vec![index.registry()]
+        || resolution_requirements(scanned) != resolution_requirements(&existing)
+        || existing.consumer_requirements != *requirements
+        || !crate::store::local_source_matches_lock(&existing, source, store)
+    {
+        return None;
+    }
+    Some(refresh_project_records(existing, scanned))
+}
+
+fn refresh_project_records(existing: LockFile, scanned: &LockFile) -> LockFile {
     let mut refreshed = existing;
     refreshed.generated_with.clone_from(&scanned.generated_with);
     refreshed.root.clone_from(&scanned.root);
@@ -396,7 +445,7 @@ pub(super) fn refresh_existing_lock(
     refreshed.bibliographies.clone_from(&scanned.bibliographies);
     refreshed.graphics.clone_from(&scanned.graphics);
     refreshed.unresolved.clone_from(&scanned.unresolved);
-    Some(refreshed)
+    refreshed
 }
 
 pub(super) fn registry_selection_matches(

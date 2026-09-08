@@ -40,7 +40,7 @@ fn local_registry_indexes_only_installed_runfiles() {
     fs::write(&tlpdb, metadata).unwrap();
     let installed = root.join("texmf-dist/tex/latex/installed/installed.sty");
     fs::create_dir_all(installed.parent().unwrap()).unwrap();
-    fs::write(installed, b"% installed").unwrap();
+    fs::write(&installed, b"% installed").unwrap();
     let mut index = TlpdbIndex::load(&tlpdb).unwrap();
     let original_digest = index.metadata_digest().to_string();
 
@@ -49,6 +49,28 @@ fn local_registry_indexes_only_installed_runfiles() {
     assert_eq!(index.provider_of_file("installed.sty"), Some("installed"));
     assert_eq!(index.provider_of_file("absent.sty"), None);
     assert_ne!(index.metadata_digest(), original_digest);
+
+    let optimized = TlpdbIndex::load_installed(&tlpdb).unwrap();
+    assert_eq!(optimized.metadata_digest(), index.metadata_digest());
+    assert_eq!(
+        optimized.provider_of_file("installed.sty"),
+        Some("installed")
+    );
+    assert_eq!(optimized.provider_of_file("absent.sty"), None);
+
+    // Re-read the installed subset on each load: host package changes must
+    // still invalidate the registry even when its tlpdb did not change.
+    fs::remove_file(installed).unwrap();
+    let removed = TlpdbIndex::load_installed(&tlpdb).unwrap();
+    assert_eq!(removed.provider_of_file("installed.sty"), None);
+    assert_ne!(removed.metadata_digest(), optimized.metadata_digest());
+    let newly_installed = root.join("texmf-dist/tex/latex/absent/absent.sty");
+    fs::create_dir_all(newly_installed.parent().unwrap()).unwrap();
+    fs::write(&newly_installed, b"% newly installed").unwrap();
+    let added = TlpdbIndex::load_installed(&tlpdb).unwrap();
+    assert_eq!(added.provider_of_file("absent.sty"), Some("absent"));
+    assert_ne!(added.metadata_digest(), removed.metadata_digest());
+
     fs::remove_dir_all(root).unwrap();
 }
 

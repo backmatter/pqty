@@ -79,10 +79,11 @@ pub(crate) fn load_tlpdb_index(
             None,
         ),
     };
-    let mut index = TlpdbIndex::load(&resolved)?;
-    if origin.is_none() {
-        index.retain_installed_runfiles();
-    }
+    let mut index = if origin.is_none() {
+        TlpdbIndex::load_installed(&resolved)?
+    } else {
+        TlpdbIndex::load(&resolved)?
+    };
     index.origin = origin;
     index.snapshot_override = snapshot;
     Ok(index)
