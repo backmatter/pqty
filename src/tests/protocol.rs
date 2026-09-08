@@ -148,8 +148,9 @@ fn golden_v1_artifacts_are_real_outputs_and_remain_readable() {
     assert_eq!(golden_exact.stage, LockStage::Exact);
 
     let capabilities = serde_json::to_value(crate::cli::protocol::Capabilities::current()).unwrap();
-    let golden_capabilities: serde_json::Value =
+    let mut golden_capabilities: serde_json::Value =
         serde_json::from_str(include_str!("../../tests/golden/v1/capabilities.json")).unwrap();
+    golden_capabilities["version"] = serde_json::json!(env!("CARGO_PKG_VERSION"));
     assert_eq!(capabilities, golden_capabilities);
 
     let mut source = MemorySourceTree::default();
@@ -157,7 +158,14 @@ fn golden_v1_artifacts_are_real_outputs_and_remain_readable() {
         VirtualPath::new("main.tex").unwrap(),
         b"\\usepackage{foo}\n",
     );
-    let scanned = scan_source(&source, VirtualPath::new("main.tex").unwrap()).unwrap();
+    let mut scanned = scan_source(&source, VirtualPath::new("main.tex").unwrap()).unwrap();
+    assert_eq!(
+        scanned.generated_with,
+        format!("pqty {}", env!("CARGO_PKG_VERSION"))
+    );
+    scanned
+        .generated_with
+        .clone_from(&golden_scanned.generated_with);
     assert_eq!(
         serde_json::to_value(&scanned).unwrap(),
         serde_json::to_value(&golden_scanned).unwrap()
