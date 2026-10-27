@@ -166,8 +166,22 @@ transport and content consistency, not publisher authentication.
 
 Store objects are immutable and corrupt content is quarantined. TEXMF
 replacement accepts a new or empty destination or a tree carrying pqty's
-ownership marker. The caller must coordinate one writer and a quiescent
-destination. Copy is the supported installation mode.
+ownership marker. OS file locks serialize writers to each destination and shared
+store. Locks sleep while contended and release when their process exits. Unchanged
+environments retain their files and generated `ls-R` database after integrity
+checks against the exact lock. Valid copied environments need neither the shared
+cache nor network access to be reused. Missing, altered, or extra package files
+cause a complete replacement.
+Copy is the supported installation mode.
+
+Installations reserve a sibling `.<destination>.pqty-install` directory for their
+persistent lock and temporary work. Interrupted replacements recover the previous
+tree on the next installation. Keep this directory private to pqty and do not
+remove its lock while processes may be running. Changed environments use a
+recoverable two-step directory replacement, not an atomic snapshot for arbitrary
+readers. Consumers must coordinate builds or tolerate files disappearing during
+updates. Successful installation does not claim power-loss durability on every
+filesystem.
 
 Current limits:
 

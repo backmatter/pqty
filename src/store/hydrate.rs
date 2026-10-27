@@ -38,6 +38,7 @@ pub fn hydrate_lock(
         source,
     })?;
     let store_dir = canonical_or_original(store_dir);
+    let _store_guard = super::transaction::FileGuard::store(&store_dir)?;
     let mut report = MaterializeReport::new(store_dir.clone(), None);
     let mut expanded_bytes = 0_u64;
 

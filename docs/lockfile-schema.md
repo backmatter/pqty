@@ -70,15 +70,21 @@ Before use, pqty verifies that:
 - project and TDS paths are portable;
 - no two providers own the same TDS path.
 
-`install` treats the lock as authoritative. It rehashes cached objects and
-verifies provider manifests. Missing content may be fetched only from the
+`install` treats the lock as authoritative. It can reuse an unchanged tree by
+rehashing its files and reconstructing each provider manifest against the locked
+integrity. This needs no shared-cache content for copied files. When replacement
+is required, it rehashes cached objects and verifies provider manifests.
+Missing content may be fetched only from the
 source recorded in the lock and is accepted only when it reproduces the locked
 integrity. Corrupt evidence is quarantined; offline installation stops without
 recovery.
 
 Installation publishes a new TEXMF tree transactionally. It accepts a new or
-empty destination or a tree with a valid pqty ownership marker. The caller
-coordinates one writer and a quiescent destination.
+empty destination or a tree with a valid pqty ownership marker. OS locks serialize
+destination and shared-store writers. A persistent private transaction directory
+retains the previous tree for recovery after process interruption. Publication
+uses two directory renames; consumers coordinate builds or tolerate transient
+missing paths when the environment changes.
 
 Local `.cls` and `.sty` files remain project-owned. pqty includes their digests,
 scans them recursively, and resolves only their non-local loads.

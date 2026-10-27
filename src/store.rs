@@ -330,6 +330,7 @@ mod hydrate;
 mod install;
 mod object;
 mod registry_cache;
+mod transaction;
 
 use container::{ContainerRequest, fetch_container_runfiles};
 use http::{read_file_bounded, validate_remote_url};

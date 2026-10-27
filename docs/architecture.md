@@ -80,11 +80,26 @@ Published objects and manifests are immutable. Concurrent identical writers
 accept the same result; conflicting content fails. Corrupt content is
 quarantined before online recovery from the source recorded in the lock.
 
-Installation verifies referenced objects, stages a normal TEXMF tree, and then
-replaces the destination. It accepts new or empty destinations and trees with
-a valid pqty ownership marker. Store/output overlap and unrelated non-empty
-directories are rejected. The caller coordinates one writer and a quiescent
-destination.
+Installation first audits a matching destination against the exact lock. It
+hashes installed files with a bounded buffer and reconstructs the pinned provider
+manifests, so valid copied trees survive a cleared shared cache. Requested link
+mode changes, missing or altered files, and extra package files require replacement.
+The generated `ls-R` database may remain alongside package files.
+
+OS locks serialize shared-store hydration/recovery and each destination's writers.
+Waiters sleep in the kernel; process exit releases the lock. The lock files remain
+in place so waiting processes always use the same inode. Installation stages a
+normal TEXMF tree in a sibling `.<destination>.pqty-install` directory, then moves
+the old destination to its backup and publishes the staged tree. The next writer
+restores the backup if publication was interrupted, or finishes backup cleanup if
+the new tree is already active. Incomplete staging trees are discarded under the
+same lock. A valid ownership record protects the transaction directory.
+
+New or empty destinations and trees with a valid pqty ownership marker are
+accepted. Store/output overlap and unrelated non-empty directories are rejected.
+Publication uses two renames and does not promise a whole-tree atomic snapshot
+to arbitrary readers. Consumers coordinate builds or tolerate transient missing
+paths. Cross-platform power-loss durability is not guaranteed.
 
 ## Trust boundary
 

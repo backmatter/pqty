@@ -147,8 +147,13 @@ Reproduces an exact lock as a TEXMF tree and verifies every installed file.
 | `--link copy\|experimental-symlink\|experimental-hardlink` | Placement mode. The supported default is `copy`. |
 
 The destination must be new, empty, or an existing tree carrying pqty's
-ownership marker. Store/output overlap is rejected. The caller must coordinate
-one writer and ensure the destination is not being read while it is replaced.
+ownership marker. Store/output overlap is rejected. OS locks coordinate writers
+to the same destination or shared store. Valid unchanged trees are audited against
+the lock and retained, including when the shared cache is empty. A sibling
+`.<destination>.pqty-install` directory holds the persistent lock and recoverable
+staging/backup trees. Interrupted installations recover on the next invocation.
+Changed trees use two directory renames, so consumers must coordinate builds or
+tolerate transient missing paths during replacement.
 
 ### `env`
 

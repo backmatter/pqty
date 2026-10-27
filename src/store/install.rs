@@ -5,6 +5,7 @@ use crate::store::object::{
     load_store_manifest, package_digest, provider_manifest_digest, quarantine_store_entry,
     store_manifest_path, write_store_manifest,
 };
+use crate::store::transaction::{FileGuard, Installation};
 use crate::store::{
     ContainerRequest, MaterializeReport, default_cache_dir, fetch_container_runfiles,
 };
@@ -19,8 +20,8 @@ use sha2::{Digest as _, Sha256};
 
 use crate::{
     LinkMode, LockFile, LockedFile, MAX_ARCHIVE_ENTRY_BYTES, PqtyError, ResolvedEnvironment,
-    ResolvedPackage, canonical_or_original, progress, unique_sibling, usable_parent,
-    validate_materialized_lock, validate_tds_path,
+    ResolvedPackage, canonical_or_original, progress, usable_parent, validate_materialized_lock,
+    validate_tds_path,
 };
 
 const MATERIALIZED_MARKER: &str = ".pqty-materialized.json";
@@ -33,11 +34,14 @@ struct MaterializedTreeMarker {
     schema: String,
     generated_with: String,
     environment_fingerprint: String,
+    #[serde(default)]
+    link_mode: Option<String>,
 }
 
 /// Reproduce an exact lock without re-resolving it. Existing content-addressed
-/// objects are checked against the package manifest in the store; missing
-/// objects are recovered from the registry recorded in the lock and the whole
+/// objects are checked against the package manifest in the store when a new
+/// tree is needed; an existing copied tree is checked directly against the lock.
+/// Missing objects are recovered from the registry recorded in the lock and the whole
 /// provider is verified against its one locked digest.
 /// Reproduce a locked TEXMF tree without resolving against current registry
 /// metadata.
@@ -69,8 +73,20 @@ pub(crate) fn install_locked_with_policy(
         source,
     })?;
     let store_dir = canonical_or_original(store_dir);
+    fs::create_dir_all(usable_parent(out_dir)).map_err(|source| PqtyError::Io {
+        path: out_dir.to_path_buf(),
+        source,
+    })?;
+    ensure_distinct_store_and_output(&store_dir, out_dir)?;
+    let installation = Installation::acquire(out_dir)?;
 
-    let mut report = MaterializeReport::new(store_dir.clone(), None);
+    let mut report = MaterializeReport::new(store_dir.clone(), Some(out_dir.to_path_buf()));
+    if installed_tree_matches(&installation.destination, lock, mode, &store_dir)? {
+        report.providers = lock.closure.len();
+        report.files = lock.closure.iter().map(|entry| entry.files.len()).sum();
+        return Ok(report);
+    }
+    let _store_guard = FileGuard::store(&store_dir)?;
     let mut inspected = Vec::with_capacity(lock.closure.len());
     for entry in &lock.closure {
         let state = inspect_stored_provider(&store_dir, entry)?;
@@ -119,7 +135,7 @@ pub(crate) fn install_locked_with_policy(
         report.files += entry.files.len();
     }
 
-    materialize_from_store(lock, &store_dir, out_dir, mode)?;
+    materialize_locked(lock, &store_dir, &installation, mode, true)?;
     report.out = Some(out_dir.to_path_buf());
     Ok(report)
 }
@@ -219,12 +235,28 @@ pub(super) fn stored_file_digest(digest: &str) -> Result<&str, PqtyError> {
         .ok_or_else(|| PqtyError::Usage(format!("invalid stored file digest: {digest}")))
 }
 
-fn verify_file_digest(path: &Path, expected: &str) -> Result<(), PqtyError> {
-    let bytes = fs::read(path).map_err(|source| PqtyError::Io {
+fn file_digest(path: &Path) -> Result<String, PqtyError> {
+    let mut file = fs::File::open(path).map_err(|source| PqtyError::Io {
         path: path.to_path_buf(),
         source,
     })?;
-    let got = hex::encode(Sha256::digest(bytes));
+    let mut hasher = Sha256::new();
+    let mut buffer = [0; 16384];
+    loop {
+        let count = file.read(&mut buffer).map_err(|source| PqtyError::Io {
+            path: path.to_path_buf(),
+            source,
+        })?;
+        if count == 0 {
+            break;
+        }
+        hasher.update(&buffer[..count]);
+    }
+    Ok(hex::encode(hasher.finalize()))
+}
+
+fn verify_file_digest(path: &Path, expected: &str) -> Result<(), PqtyError> {
+    let got = file_digest(path)?;
     if got == expected {
         Ok(())
     } else {
@@ -402,96 +434,161 @@ pub fn materialize_from_store(
     out_dir: &Path,
     mode: LinkMode,
 ) -> Result<(), PqtyError> {
-    let environment = ResolvedEnvironment::from_lock(lock)?;
+    validate_materialized_lock(lock)?;
     let parent = usable_parent(out_dir);
     fs::create_dir_all(parent).map_err(|source| PqtyError::Io {
         path: parent.to_path_buf(),
         source,
     })?;
-    ensure_distinct_store_and_output(store_dir, out_dir)?;
-    ensure_replaceable_destination(out_dir)?;
-    let staging = unique_sibling(out_dir, "stage")?;
-    fs::create_dir(&staging).map_err(|source| PqtyError::Io {
+    let store_dir = canonical_or_original(store_dir);
+    ensure_distinct_store_and_output(&store_dir, out_dir)?;
+    let installation = Installation::acquire(out_dir)?;
+    if installed_tree_matches(&installation.destination, lock, mode, &store_dir)? {
+        return Ok(());
+    }
+    let _store_guard = FileGuard::store(&store_dir)?;
+    materialize_locked(lock, &store_dir, &installation, mode, false)
+}
+
+fn materialize_locked(
+    lock: &LockFile,
+    store_dir: &Path,
+    installation: &Installation,
+    mode: LinkMode,
+    store_verified: bool,
+) -> Result<(), PqtyError> {
+    let environment = ResolvedEnvironment::from_lock(lock)?;
+    // Check each store object once, then use this same placement plan for
+    // auditing the installed tree and, only if necessary, rebuilding it.
+    let mut files = BTreeMap::new();
+    for entry in &lock.closure {
+        let manifest = load_store_manifest(store_dir, entry)?;
+        for file in manifest.files {
+            if file.tds_path == MATERIALIZED_MARKER {
+                return Err(PqtyError::Usage(format!(
+                    "locked TDS path uses pqty's reserved ownership marker: {MATERIALIZED_MARKER}"
+                )));
+            }
+            let digest = stored_file_digest(&file.digest)?;
+            let object = store_dir.join(&digest[..2]).join(digest);
+            if !store_verified {
+                verify_file_digest(&object, digest)?;
+            }
+            files.insert(PathBuf::from(file.tds_path), (object, digest.to_string()));
+        }
+    }
+    let staging = &installation.stage;
+    fs::create_dir(staging).map_err(|source| PqtyError::Io {
         path: staging.clone(),
         source,
     })?;
-
-    let assemble = (|| -> Result<(), PqtyError> {
-        for entry in &lock.closure {
-            let manifest = load_store_manifest(store_dir, entry)?;
-            let digests = manifest
-                .files
-                .into_iter()
-                .map(|file| (file.tds_path, file.digest))
-                .collect::<BTreeMap<_, _>>();
-            for file in &entry.files {
-                if file.tds_path == MATERIALIZED_MARKER {
-                    return Err(PqtyError::Usage(format!(
-                        "locked TDS path uses pqty's reserved ownership marker: \
-                         {MATERIALIZED_MARKER}"
-                    )));
-                }
-                let digest = digests.get(&file.tds_path).ok_or_else(|| {
-                    PqtyError::Usage(format!(
-                        "package store manifest for {} omits {}",
-                        entry.provider, file.tds_path
-                    ))
-                })?;
-                let digest = stored_file_digest(digest)?;
-                let store_path = store_dir.join(&digest[..2]).join(digest);
-                verify_file_digest(&store_path, digest)?;
-                place(&store_path, &staging.join(&file.tds_path), mode)?;
-            }
+    let assemble = (|| {
+        for (path, (object, _)) in &files {
+            place(object, &staging.join(path), mode)?;
         }
-        write_materialized_marker(&staging, &environment.fingerprint)?;
-        Ok(())
+        write_materialized_marker(staging, &environment.fingerprint, mode)?;
+        installation.publish()
     })();
-    if let Err(error) = assemble {
-        let _ = remove_materialized_tree(&staging);
-        return Err(error);
+    if assemble.is_err() && staging.exists() {
+        let _ = remove_materialized_tree(staging);
     }
-
-    promote_tree(&staging, out_dir)
+    assemble
 }
 
-fn promote_tree(staging: &Path, destination: &Path) -> Result<(), PqtyError> {
-    if let Err(error) = ensure_replaceable_destination(destination) {
-        let _ = remove_materialized_tree(staging);
-        return Err(error);
-    }
-    let existing = destination.symlink_metadata().ok();
-
-    let backup = unique_sibling(destination, "previous")?;
-    if existing.is_some() {
-        fs::rename(destination, &backup).map_err(|source| {
-            let _ = remove_materialized_tree(staging);
-            PqtyError::Io {
-                path: destination.to_path_buf(),
-                source,
-            }
-        })?;
-    }
-
-    if let Err(source) = fs::rename(staging, destination) {
-        if existing.is_some() {
-            let _ = fs::rename(&backup, destination);
-        }
-        let _ = remove_materialized_tree(staging);
-        return Err(PqtyError::Io {
-            path: destination.to_path_buf(),
-            source,
-        });
-    }
-
-    if existing.is_some()
-        && let Err(error) = remove_materialized_tree(&backup)
+fn installed_tree_matches(
+    root: &Path,
+    lock: &LockFile,
+    mode: LinkMode,
+    store_dir: &Path,
+) -> Result<bool, PqtyError> {
+    let marker = fs::read(root.join(MATERIALIZED_MARKER))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<MaterializedTreeMarker>(&bytes).ok());
+    let Some(marker) = marker else {
+        return Ok(false);
+    };
+    if marker.link_mode.as_deref() != Some(mode_name(mode))
+        || marker.environment_fingerprint != ResolvedEnvironment::from_lock(lock)?.fingerprint
     {
-        eprintln!(
-            "pqty: warning: installed environment but could not remove previous tree {}: {error}",
-            backup.display()
-        );
+        return Ok(false);
     }
-    Ok(())
+    let expected: BTreeSet<_> = lock
+        .closure
+        .iter()
+        .flat_map(|entry| entry.files.iter().map(|file| Path::new(&file.tds_path)))
+        .collect();
+    let mut pending = vec![root.to_path_buf()];
+    let mut digests = BTreeMap::new();
+    while let Some(directory) = pending.pop() {
+        let entries = fs::read_dir(&directory).map_err(|source| PqtyError::Io {
+            path: directory.clone(),
+            source,
+        })?;
+        for entry in entries {
+            let entry = entry.map_err(|source| PqtyError::Io {
+                path: directory.clone(),
+                source,
+            })?;
+            let path = entry.path();
+            let relative = path.strip_prefix(root).expect("TEXMF descendant");
+            let kind = entry.file_type().map_err(|source| PqtyError::Io {
+                path: path.clone(),
+                source,
+            })?;
+            if kind.is_dir() {
+                pending.push(path);
+                continue;
+            }
+            if !expected.contains(relative) {
+                if relative == Path::new(MATERIALIZED_MARKER) || relative == Path::new("ls-R") {
+                    continue;
+                }
+                return Ok(false);
+            }
+            if !(kind.is_file() || kind.is_symlink()) {
+                return Ok(false);
+            }
+            let Ok(digest) = file_digest(&path) else {
+                return Ok(false);
+            };
+            if kind.is_symlink()
+                && (!matches!(mode, LinkMode::Symlink)
+                    || fs::read_link(&path).ok()
+                        != Some(store_dir.join(&digest[..2]).join(&digest)))
+            {
+                return Ok(false);
+            }
+            digests.insert(relative.to_path_buf(), format!("sha256:{digest}"));
+        }
+    }
+    if digests.len() != expected.len() {
+        return Ok(false);
+    }
+    // Reconstruct each provider manifest from the actual installed bytes. Its
+    // digest is already pinned in the exact lock, so auditing a copied tree
+    // needs neither shared-cache files nor a registry request.
+    for entry in &lock.closure {
+        let files = entry
+            .files
+            .iter()
+            .map(|file| StoredFile {
+                tds_path: file.tds_path.clone(),
+                digest: digests[Path::new(&file.tds_path)].clone(),
+            })
+            .collect::<Vec<_>>();
+        if hex::encode(provider_manifest_digest(&files)?) != package_digest(entry)? {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+fn mode_name(mode: LinkMode) -> &'static str {
+    match mode {
+        LinkMode::Copy => "copy",
+        LinkMode::Symlink => "experimental-symlink",
+        LinkMode::Hardlink => "experimental-hardlink",
+    }
 }
 
 fn ensure_distinct_store_and_output(store_dir: &Path, out_dir: &Path) -> Result<(), PqtyError> {
@@ -525,7 +622,7 @@ fn canonical_destination(path: &Path) -> Result<PathBuf, PqtyError> {
     Ok(parent.join(name))
 }
 
-fn ensure_replaceable_destination(destination: &Path) -> Result<(), PqtyError> {
+pub(super) fn ensure_replaceable_destination(destination: &Path) -> Result<(), PqtyError> {
     let metadata = match destination.symlink_metadata() {
         Ok(metadata) => metadata,
         Err(source) if source.kind() == io::ErrorKind::NotFound => return Ok(()),
@@ -592,11 +689,16 @@ fn ensure_replaceable_destination(destination: &Path) -> Result<(), PqtyError> {
     Ok(())
 }
 
-fn write_materialized_marker(root: &Path, fingerprint: &str) -> Result<(), PqtyError> {
+fn write_materialized_marker(
+    root: &Path,
+    fingerprint: &str,
+    mode: LinkMode,
+) -> Result<(), PqtyError> {
     let marker = MaterializedTreeMarker {
         schema: MATERIALIZED_MARKER_SCHEMA.to_string(),
         generated_with: format!("pqty/{}", env!("CARGO_PKG_VERSION")),
         environment_fingerprint: fingerprint.to_string(),
+        link_mode: Some(mode_name(mode).to_string()),
     };
     let mut bytes = serde_json::to_vec_pretty(&marker)?;
     bytes.push(b'\n');
@@ -661,7 +763,7 @@ fn copy_store_file(src: &Path, dst: &Path) -> io::Result<()> {
     fs::set_permissions(dst, permissions)
 }
 
-fn remove_materialized_tree(path: &Path) -> io::Result<()> {
+pub(super) fn remove_materialized_tree(path: &Path) -> io::Result<()> {
     #[cfg(windows)]
     make_tree_removable(path)?;
     fs::remove_dir_all(path)

@@ -85,6 +85,7 @@ fn materialized_tree_replacement_is_transactional() {
     assert_materialization_destination_safety(&root, &store, &lock);
 
     materialize_from_store(&lock, &store, &out, LinkMode::Copy).unwrap();
+    assert_environment_reuse_and_recovery(&root, &store, &out, &lock, bytes);
     fs::write(out.join("old-marker"), b"old").unwrap();
     materialize_from_store(&lock, &store, &out, LinkMode::Copy).unwrap();
     let installed = out.join("tex/latex/foo/foo.sty");
@@ -92,6 +93,9 @@ fn materialized_tree_replacement_is_transactional() {
     assert!(!out.join("old-marker").exists());
 
     fs::write(&store_object, b"corrupt").unwrap();
+    // A valid copied tree is independent of a damaged shared cache.
+    materialize_from_store(&lock, &store, &out, LinkMode::Copy).unwrap();
+    fs::write(out.join("force-replacement"), b"extra file").unwrap();
     assert!(materialize_from_store(&lock, &store, &out, LinkMode::Copy).is_err());
     assert_eq!(
         fs::read(&installed).unwrap(),
@@ -101,6 +105,56 @@ fn materialized_tree_replacement_is_transactional() {
     assert!(fs::metadata(&installed).unwrap().permissions().readonly());
     make_test_tree_writable(&root);
     let _ = fs::remove_dir_all(root);
+}
+
+fn assert_environment_reuse_and_recovery(
+    root: &Path,
+    store: &Path,
+    out: &Path,
+    lock: &LockFile,
+    bytes: &[u8],
+) {
+    let installed = out.join("tex/latex/foo/foo.sty");
+    let before = fs::metadata(&installed).unwrap().modified().unwrap();
+    // texe owns this generated database. A no-op installation must retain it.
+    fs::write(out.join("ls-R"), b"existing filename database").unwrap();
+    materialize_from_store(lock, store, out, LinkMode::Copy).unwrap();
+    assert_eq!(
+        fs::read(out.join("ls-R")).unwrap(),
+        b"existing filename database"
+    );
+    assert_eq!(
+        fs::metadata(&installed).unwrap().modified().unwrap(),
+        before
+    );
+
+    // Fingerprints alone cannot prove that an installed file is still valid.
+    make_test_writable(&installed);
+    fs::write(&installed, vec![b'x'; bytes.len()]).unwrap();
+    materialize_from_store(lock, store, out, LinkMode::Copy).unwrap();
+    assert_eq!(fs::read(&installed).unwrap(), bytes);
+    make_test_writable(&installed);
+    fs::remove_file(&installed).unwrap();
+    materialize_from_store(lock, store, out, LinkMode::Copy).unwrap();
+    assert_eq!(fs::read(&installed).unwrap(), bytes);
+
+    // Simulate a process dying after moving the old destination, with an
+    // incomplete new generation still private in the transaction directory.
+    let control = root.join(".texmf.pqty-install");
+    fs::rename(out, control.join("previous")).unwrap();
+    fs::create_dir(control.join("stage")).unwrap();
+    fs::write(control.join("stage/partial"), b"incomplete").unwrap();
+    materialize_from_store(lock, store, out, LinkMode::Copy).unwrap();
+    assert_eq!(fs::read(&installed).unwrap(), bytes);
+    assert!(!control.join("previous").exists());
+    assert!(!control.join("stage").exists());
+
+    // A committed destination wins over a backup left by interrupted cleanup.
+    fs::create_dir(control.join("previous")).unwrap();
+    fs::write(control.join("previous/old"), b"previous generation").unwrap();
+    materialize_from_store(lock, store, out, LinkMode::Copy).unwrap();
+    assert!(!control.join("previous").exists());
+    assert_eq!(fs::read(&installed).unwrap(), bytes);
 }
 
 fn assert_materialization_destination_safety(root: &Path, store: &Path, lock: &LockFile) {
@@ -226,8 +280,32 @@ fn install_uses_the_locked_files_and_then_the_content_store() {
     );
     assert!(!offline_out.exists());
 
+    assert_copy_reuse_without_cache(&install_store, &first_out, &lock);
+
     make_test_tree_writable(&root);
     fs::remove_dir_all(root).unwrap();
+}
+
+fn assert_copy_reuse_without_cache(install_store: &Path, first_out: &Path, lock: &LockFile) {
+    // Reusing an already verified copy needs neither the removed registry nor
+    // the quarantined, and subsequently completely cleared, package cache.
+    install_locked_with_policy(lock, install_store, first_out, LinkMode::Copy, true, false)
+        .unwrap();
+    make_test_tree_writable(install_store);
+    fs::remove_dir_all(install_store).unwrap();
+    let reused =
+        install_locked_with_policy(lock, install_store, first_out, LinkMode::Copy, true, false)
+            .unwrap();
+    assert_eq!(reused.bytes_stored(), 0);
+    assert!(!install_store.join("manifests").exists());
+    let installed = first_out.join("tex/latex/foo/foo.sty");
+    make_test_writable(&installed);
+    fs::write(&installed, vec![b'x'; br"\ProvidesPackage{foo}".len()]).unwrap();
+    assert!(
+        install_locked_with_policy(lock, install_store, first_out, LinkMode::Copy, true, false)
+            .is_err(),
+        "an ownership marker cannot hide corrupt installed content"
+    );
 }
 
 #[test]

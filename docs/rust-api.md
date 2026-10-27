@@ -77,8 +77,11 @@ those policies as one supported operation.
   store and changes a resolved lock to the `Exact` stage.
 - `materialize_from_store` publishes an already hydrated lock as a
   transactional TEXMF tree.
-- `install_locked` verifies the store, recovers missing locked objects when
-  possible, and publishes the TEXMF tree.
+- `install_locked` verifies and reuses an unchanged installed tree directly
+  against the lock. Otherwise it verifies the store, recovers missing locked
+  objects when possible, and publishes the TEXMF tree. Installation and hydration
+  coordinate writers with OS locks; interrupted publications recover on the next
+  invocation.
 - `MaterializeReport` reports provider, file, byte, store, and output counts.
 - `LinkMode::Copy` is the supported mode; the symlink and hardlink variants are
   experimental.
