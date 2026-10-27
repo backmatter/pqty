@@ -284,3 +284,23 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release edit "$GITHUB_REF_NAME" --draft=false --latest
+
+      - name: Create texe handoff token
+        id: texe-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: texe
+          permission-contents: write
+
+      - name: Request a tested texe suite update
+        env:
+          GH_TOKEN: ${{ steps.texe-token.outputs.token }}
+        shell: bash
+        run: |
+          jq -n --arg tag "$GITHUB_REF_NAME" \
+            '{event_type:"pqty-release",client_payload:{tag:$tag}}' > "$RUNNER_TEMP/pqty-release.json"
+          gh api --method POST "repos/$GITHUB_REPOSITORY_OWNER/texe/dispatches" \
+            --input "$RUNNER_TEMP/pqty-release.json"

@@ -41,6 +41,30 @@ uses a locally discoverable `texlive.tlpdb` by default. Set
 CI pins the snapshot used for the release acceptance suite. State any checks
 you could not run in the pull request.
 
+## Release handoff to texe
+
+After publishing a stable GitHub release, the release workflow dispatches its tag
+to texe's **Update pqty suite** workflow. texe validates the source, records an
+exact suite pin, runs installed-suite contracts and prepares a protected dependency
+PR. Its normal platform checks and release process produce the next texe suite.
+Citet and tex-ls do not need a release for every pqty update.
+
+Install texe's receiver workflow before enabling this dispatcher. The existing
+pqty release app must have access to texe with Contents write permission. The
+organization having separate release apps for both repositories does not verify
+that cross-repository scope. Confirm it during rollout. No new token secret is
+required when the existing app has the required access.
+
+A failed dispatch leaves pqty published. Retry the receiver directly:
+
+```sh
+gh workflow run pqty-update.yml --repo backmatter/texe --ref main -f tag=v0.1.2
+```
+
+See [texe's release procedure](https://github.com/backmatter/texe/blob/main/docs/releasing.md)
+for idempotency and recovery details. Use a new release version for changed
+binaries rather than replacing an existing tag.
+
 ## Pull requests
 
 - Keep changes focused and add regression tests for behavior changes.
