@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.2](https://github.com/backmatter/pqty/compare/v0.1.1...v0.1.2) - 2026-10-28
+
+### Fixed
+
+- flush transaction ownership through its writable handle
+- pass Windows transaction lint and update TLS dependencies
+- reuse and coordinate package installations safely
+
+### Other
+
+- verify native handoff access before publishing releases
+- hand published pqty releases to texe suite validation
+
 ## [0.1.1](https://github.com/backmatter/pqty/compare/v0.1.0...v0.1.1) - 2026-09-08
 
 ### Fixed
