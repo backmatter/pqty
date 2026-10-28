@@ -4,6 +4,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use std::io::Write as _;
+
 use super::install::{ensure_replaceable_destination, remove_materialized_tree};
 use crate::{PqtyError, usable_parent};
 
@@ -99,9 +101,13 @@ impl Installation {
                         )));
                     }
                 }
-                fs::write(&owner, OWNER).map_err(|source| error(&owner, source))?;
-                fs::File::open(&owner)
-                    .and_then(|file| file.sync_all())
+                let mut file = fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(&owner)
+                    .map_err(|source| error(&owner, source))?;
+                file.write_all(OWNER)
+                    .and_then(|()| file.sync_all())
                     .map_err(|source| error(&owner, source))?;
                 sync_directory(&root)?;
             }
