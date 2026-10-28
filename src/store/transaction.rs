@@ -218,6 +218,7 @@ fn sync_directory(path: &Path) -> Result<(), PqtyError> {
 }
 
 #[cfg(not(unix))]
+#[allow(clippy::unnecessary_wraps)] // Match the fallible Unix directory-sync interface.
 fn sync_directory(_path: &Path) -> Result<(), PqtyError> {
     Ok(())
 }
