@@ -55,6 +55,17 @@ organization having separate release apps for both repositories does not verify
 that cross-repository scope. Confirm it during rollout. No new token secret is
 required when the existing app has the required access.
 
+Before publishing a new pqty version, run the reusable handoff workflow against
+an existing stable tag. Its default mode verifies App access without dispatching:
+
+```sh
+gh workflow run texe-handoff.yml --repo backmatter/pqty --ref main -f tag=v0.1.1
+```
+
+After texe's receiver is merged, add `-F dispatch=true` to verify the full handoff
+with the already pinned tag. The receiver leaves an unchanged pin alone.
+The release workflow calls this same handoff with dispatch enabled.
+
 A failed dispatch leaves pqty published. Retry the receiver directly:
 
 ```sh
