@@ -1,4 +1,5 @@
 [workspace]
+release_commits = '^(feat|fix|docs|perf|revert)(\([^\r\n)]*\))?!?:|^[a-z]+(\([^\r\n)]*\))?!:|(?m)^BREAKING[ -]CHANGE:'
 allow_dirty = false
 changelog_update = false
 dependencies_update = false
