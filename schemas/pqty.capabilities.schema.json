@@ -11,7 +11,8 @@
     "trace_schema",
     "trace_report_schema",
     "convergence_report_schema",
-    "progress_schema"
+    "progress_schema",
+    "bundle_schema"
   ],
   "properties": {
     "schema": {
@@ -38,6 +39,12 @@
     },
     "progress_schema": {
       "const": "pqty.progress/v1"
+    },
+    "bundle_schema": {
+      "const": "pqty.bundle/v1"
+    },
+    "install_reuse_matching_tree": {
+      "type": "boolean"
     }
   },
   "additionalProperties": false

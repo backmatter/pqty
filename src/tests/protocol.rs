@@ -147,7 +147,13 @@ fn golden_v1_artifacts_are_real_outputs_and_remain_readable() {
     assert_eq!(golden_resolved.stage, LockStage::Resolved);
     assert_eq!(golden_exact.stage, LockStage::Exact);
 
-    let capabilities = serde_json::to_value(crate::cli::protocol::Capabilities::current()).unwrap();
+    let mut capabilities =
+        serde_json::to_value(crate::cli::protocol::Capabilities::current()).unwrap();
+    // Optional additions to the v1 document; the frozen fixture predates them.
+    capabilities
+        .as_object_mut()
+        .unwrap()
+        .remove("install_reuse_matching_tree");
     let mut golden_capabilities: serde_json::Value =
         serde_json::from_str(include_str!("../../tests/golden/v1/capabilities.json")).unwrap();
     golden_capabilities["version"] = serde_json::json!(env!("CARGO_PKG_VERSION"));

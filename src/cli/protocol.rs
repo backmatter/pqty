@@ -16,6 +16,9 @@ pub(crate) struct Capabilities {
     pub(crate) trace_report_schema: String,
     pub(crate) convergence_report_schema: String,
     pub(crate) progress_schema: String,
+    pub(crate) bundle_schema: String,
+    /// `install --reuse-matching-tree` is available.
+    pub(crate) install_reuse_matching_tree: bool,
 }
 
 impl Capabilities {
@@ -29,6 +32,8 @@ impl Capabilities {
             trace_report_schema: TRACE_REPORT_SCHEMA.to_string(),
             convergence_report_schema: CONVERGENCE_REPORT_SCHEMA.to_string(),
             progress_schema: PROGRESS_SCHEMA.to_string(),
+            bundle_schema: crate::BUNDLE_SCHEMA.to_string(),
+            install_reuse_matching_tree: true,
         }
     }
 }

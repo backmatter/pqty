@@ -10,8 +10,8 @@ use crate::{
     hydrate_lock, install_locked_with_policy, load_convergence_index, load_tlpdb_index,
     normalized_consumer_requirements, print_explanation, print_tree, print_why, progress,
     read_lock, read_trace, require_runtime, resolve, scan_cli_project, stable_convergence_report,
-    tlnet_base_from_tlpdb_url, validate_lock, validate_materialized_lock, validate_tlpdb_digest,
-    write_lock,
+    tlnet_base_from_tlpdb_url, tree_matches_lock, validate_lock, validate_materialized_lock,
+    validate_tlpdb_digest, write_lock,
 };
 
 pub(super) fn run(cli: Cli) -> Result<(), PqtyError> {
@@ -28,6 +28,31 @@ pub(super) fn run(cli: Cli) -> Result<(), PqtyError> {
         allow_insecure: cli.allow_insecure_registry,
     };
     match cli.command {
+        Command::Registry { tlpdb } => {
+            let index = crate::TlpdbIndex::load_installed(&tlpdb)?;
+            println!(
+                "{}",
+                serde_json::json!({"schema":"pqty.registry/v1", "metadata_digest":index.metadata_digest()})
+            );
+            Ok(())
+        }
+        Command::Bundle {
+            lock,
+            store,
+            output,
+        } => crate::export_bundle(
+            &crate::read_lock(&lock)?,
+            &context.config.store_dir(store),
+            &output,
+        ),
+        Command::Import {
+            bundle,
+            store,
+            lock,
+        } => {
+            let imported = crate::import_bundle(&bundle, &context.config.store_dir(store))?;
+            crate::write_lock(&lock, &imported)
+        }
         Command::Capabilities {} => run_capabilities(),
         command @ Command::Scan { .. } => run_scan(&context, command),
         command @ Command::Explain { .. } => run_explain(&context, command),
@@ -162,12 +187,18 @@ fn run_install(context: &ExecutionContext, command: Command) -> Result<(), PqtyE
         store,
         out,
         link,
+        reuse_matching_tree,
     } = command
     else {
         unreachable!("install handler received another command");
     };
+    let lock = read_lock(&lock)?;
+    if reuse_matching_tree && tree_matches_lock(&lock, &out) {
+        println!("environment already installed: {}", out.display());
+        return Ok(());
+    }
     let report = install_locked_with_policy(
-        &read_lock(&lock)?,
+        &lock,
         &context.config.store_dir(store),
         &out,
         link,

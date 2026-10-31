@@ -135,15 +135,17 @@ pub use registry::{IndexPackage, PackageRegistry, TlpdbIndex, require_runtime, r
 pub(crate) use registry::{locate_tlpdb, normalized_consumer_requirements, resolved_from};
 
 mod store;
+pub use store::{
+    BUNDLE_SCHEMA, MaterializeReport, PackageByteSource, export_bundle, hydrate_lock,
+    import_bundle, install_locked, materialize_from_store,
+};
 #[cfg(test)]
 use store::{BoundedWriter, take_container_runfile};
-pub use store::{
-    MaterializeReport, PackageByteSource, hydrate_lock, install_locked, materialize_from_store,
-};
 pub(crate) use store::{
     MetadataCachePolicy, RegistryRequest, add_trace_providers, byte_source, default_store_dir,
     fetch_tlpdb, install_locked_with_policy, load_convergence_index, load_tlpdb_index,
-    normalize_runfile, read_bounded, tlnet_base_from_tlpdb_url, validate_tlpdb_digest,
+    normalize_runfile, read_bounded, tlnet_base_from_tlpdb_url, tree_matches_lock,
+    validate_tlpdb_digest,
 };
 
 mod convergence;

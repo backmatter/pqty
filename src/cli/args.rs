@@ -96,6 +96,29 @@ fn valid_iso_date(value: &str) -> bool {
 
 #[derive(Debug, Subcommand)]
 pub(super) enum Command {
+    /// Inspect the exact installed provider index without resolving a project.
+    Registry {
+        #[arg(long)]
+        tlpdb: PathBuf,
+    },
+    /// Export verified locked package bytes for another machine or offline use.
+    Bundle {
+        #[arg(long)]
+        lock: PathBuf,
+        #[arg(long)]
+        store: Option<PathBuf>,
+        #[arg(short, long)]
+        output: PathBuf,
+    },
+    /// Validate and import a portable package bundle into the immutable store.
+    Import {
+        #[arg(long)]
+        bundle: PathBuf,
+        #[arg(long)]
+        store: Option<PathBuf>,
+        #[arg(long)]
+        lock: PathBuf,
+    },
     /// Print the stable JSON and CLI protocols supported by this binary.
     Capabilities {},
     /// Print the dependency graph inferred from a root .tex file.
@@ -170,6 +193,11 @@ pub(super) enum Command {
         /// How to place files in the TEXMF tree from the store.
         #[arg(long, value_enum, default_value_t = LinkMode::Copy)]
         link: LinkMode,
+        /// Skip store verification and replacement when the tree already
+        /// carries this lock's environment fingerprint and every locked file.
+        /// For build loops that own the tree; omit it to re-verify.
+        #[arg(long)]
+        reuse_matching_tree: bool,
     },
     /// Resolve and hash a complete package closure into a deterministic lockfile.
     Lock {

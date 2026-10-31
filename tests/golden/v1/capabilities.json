@@ -6,5 +6,6 @@
   "trace_schema": "pqty.trace/v1",
   "trace_report_schema": "pqty.trace-report/v1",
   "convergence_report_schema": "pqty.convergence-report/v1",
-  "progress_schema": "pqty.progress/v1"
+  "progress_schema": "pqty.progress/v1",
+  "bundle_schema": "pqty.bundle/v1"
 }

@@ -1,4 +1,39 @@
 #[test]
+fn raw_bundle_extensions_are_rejected_before_reading_their_declared_bodies() {
+    use std::io::Write as _;
+    for kind in [tar::EntryType::XHeader, tar::EntryType::GNULongName] {
+        let root = temporary_test_root("bundle-extensions");
+        fs::create_dir_all(&root).unwrap();
+        let source = root.join("main.tex");
+        let pdf = root.join("main.pdf");
+        fs::write(&source, b"research source").unwrap();
+        fs::write(&pdf, b"last PDF").unwrap();
+        let mut header = tar::Header::new_gnu();
+        header.set_path(".path-metadata").unwrap();
+        header.set_entry_type(kind);
+        header.set_size(1024 * 1024 * 1024);
+        header.set_cksum();
+        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+        encoder.write_all(header.as_bytes()).unwrap();
+        let path = root.join("oversized.tar.gz");
+        fs::write(&path, encoder.finish().unwrap()).unwrap();
+        let store = root.join("store");
+        let error = crate::import_bundle(&path, &store).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("Invalid package bundle metadata entry"),
+            "{error}"
+        );
+        assert_eq!(fs::read(&source).unwrap(), b"research source");
+        assert_eq!(fs::read(&pdf).unwrap(), b"last PDF");
+        assert_eq!(fs::read_dir(&store).unwrap().count(), 0);
+        fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[test]
+#[allow(clippy::too_many_lines)]
 fn materialized_tree_replacement_is_transactional() {
     let root = temporary_test_root("tree");
     let store = root.join("store");
@@ -92,7 +127,41 @@ fn materialized_tree_replacement_is_transactional() {
     assert_eq!(fs::read(&installed).unwrap(), bytes);
     assert!(!out.join("old-marker").exists());
 
+    let bundle = root.join("portable.tar.gz");
+    crate::export_bundle(&lock, &store, &bundle).unwrap();
+    let imported_store = root.join("imported-store");
+    let imported = crate::import_bundle(&bundle, &imported_store).unwrap();
+    let imported_tree = root.join("imported-tree");
+    materialize_from_store(&imported, &imported_store, &imported_tree, LinkMode::Copy).unwrap();
+    assert_eq!(
+        fs::read(imported_tree.join("tex/latex/foo/foo.sty")).unwrap(),
+        bytes
+    );
+    let archive_bytes = fs::read(&bundle).unwrap();
+    for suffix in [b"trailing garbage".as_slice(), archive_bytes.as_slice()] {
+        let appended = root.join("appended.tar.gz");
+        let mut appended_bytes = archive_bytes.clone();
+        appended_bytes.extend_from_slice(suffix);
+        fs::write(&appended, appended_bytes).unwrap();
+        assert!(
+            crate::import_bundle(&appended, &imported_store).is_err(),
+            "compressed bytes after the gzip member must not publish package manifests"
+        );
+        assert_eq!(
+            fs::read(imported_tree.join("tex/latex/foo/foo.sty")).unwrap(),
+            bytes
+        );
+    }
+    let truncated = root.join("truncated.tar.gz");
+    fs::write(&truncated, &archive_bytes[..archive_bytes.len() - 8]).unwrap();
+    assert!(crate::import_bundle(&truncated, &imported_store).is_err());
+    assert_eq!(
+        fs::read(imported_tree.join("tex/latex/foo/foo.sty")).unwrap(),
+        bytes
+    );
     fs::write(&store_object, b"corrupt").unwrap();
+    assert!(crate::export_bundle(&lock, &store, &bundle).is_err());
+    assert_eq!(fs::read(&bundle).unwrap(), archive_bytes);
     // A valid copied tree is independent of a damaged shared cache.
     materialize_from_store(&lock, &store, &out, LinkMode::Copy).unwrap();
     fs::write(out.join("force-replacement"), b"extra file").unwrap();

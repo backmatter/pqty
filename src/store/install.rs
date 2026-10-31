@@ -59,6 +59,33 @@ pub fn install_locked(
     install_locked_with_policy(lock, store_dir, out_dir, mode, false, false)
 }
 
+/// Whether `out_dir` is a tree pqty materialized for exactly this lock: its
+/// ownership marker carries the lock's environment fingerprint and every locked
+/// file is present. Contents are not rehashed, so this suits a caller that owns
+/// the tree, such as a build loop calling install on every rebuild.
+#[must_use]
+pub fn tree_matches_lock(lock: &LockFile, out_dir: &Path) -> bool {
+    let Ok(environment) = ResolvedEnvironment::from_lock(lock) else {
+        return false;
+    };
+    let Ok(bytes) = fs::read(out_dir.join(MATERIALIZED_MARKER)) else {
+        return false;
+    };
+    let Ok(marker) = serde_json::from_slice::<MaterializedTreeMarker>(&bytes) else {
+        return false;
+    };
+    marker.schema == MATERIALIZED_MARKER_SCHEMA
+        && marker.environment_fingerprint == environment.fingerprint
+        && lock.closure.iter().all(|entry| {
+            entry.files.iter().all(|file| {
+                out_dir
+                    .join(&file.tds_path)
+                    .symlink_metadata()
+                    .is_ok_and(|metadata| metadata.is_file())
+            })
+        })
+}
+
 pub(crate) fn install_locked_with_policy(
     lock: &LockFile,
     store_dir: &Path,

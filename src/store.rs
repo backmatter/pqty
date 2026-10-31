@@ -324,11 +324,13 @@ fn provider_bytes(
 }
 
 mod archive;
+mod bundle;
 mod container;
 mod http;
 mod hydrate;
 mod install;
 mod object;
+pub use bundle::{BUNDLE_SCHEMA, export_bundle, import_bundle};
 mod registry_cache;
 mod transaction;
 
@@ -341,8 +343,8 @@ pub(crate) use archive::BoundedWriter;
 pub(crate) use http::read_bounded;
 pub(crate) use hydrate::add_trace_providers;
 pub use hydrate::hydrate_lock;
-pub(crate) use install::install_locked_with_policy;
 pub use install::{install_locked, materialize_from_store};
+pub(crate) use install::{install_locked_with_policy, tree_matches_lock};
 pub(crate) use registry_cache::{
     default_store_dir, fetch_tlpdb, load_convergence_index, load_tlpdb_index,
     tlnet_base_from_tlpdb_url, validate_tlpdb_digest,

@@ -866,6 +866,7 @@ version = "0.1.2"
 dependencies = [
  "base64",
  "clap",
+ "flate2",
  "hex",
  "jsonschema",
  "lzma-rs",
