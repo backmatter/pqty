@@ -1,0 +1,8 @@
+{
+  "name": "@pqty/browser",
+  "version": "0.1.4",
+  "type": "module",
+  "license": "MIT",
+  "exports": { ".": "./filesystem.mjs" },
+  "dependencies": { "@noble/hashes": "2.2.0" }
+}

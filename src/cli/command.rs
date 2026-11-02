@@ -28,14 +28,7 @@ pub(super) fn run(cli: Cli) -> Result<(), PqtyError> {
         allow_insecure: cli.allow_insecure_registry,
     };
     match cli.command {
-        Command::Registry { tlpdb } => {
-            let index = crate::TlpdbIndex::load_installed(&tlpdb)?;
-            println!(
-                "{}",
-                serde_json::json!({"schema":"pqty.registry/v1", "metadata_digest":index.metadata_digest()})
-            );
-            Ok(())
-        }
+        command @ Command::Registry { .. } => run_registry(&context, command),
         Command::Bundle {
             lock,
             store,
@@ -54,6 +47,9 @@ pub(super) fn run(cli: Cli) -> Result<(), PqtyError> {
             crate::write_lock(&lock, &imported)
         }
         Command::Capabilities { schema } => run_capabilities(&schema),
+        command @ Command::Package { .. } => run_package(&context, command),
+        command @ Command::Mirror { .. } => run_mirror(&context, command),
+        command @ Command::PackageFile { .. } => run_package_file(&context, command),
         Command::Files {
             lock,
             store,
@@ -121,19 +117,139 @@ impl ExecutionContext {
     }
 }
 
-fn run_capabilities(schema: &str) -> Result<(), PqtyError> {
-    let mut capabilities = serde_json::to_value(Capabilities::current())?;
-    if matches!(schema, "pqty.capabilities/v2" | "pqty.capabilities/v3") {
-        capabilities["schema"] = schema.into();
-        capabilities["languages_schema"] = crate::LANGUAGES_SCHEMA.into();
-        capabilities["file_manifest_schema"] = crate::FILE_MANIFEST_SCHEMA.into();
-        capabilities["language_requirements"] = true.into();
+fn run_registry(context: &ExecutionContext, command: Command) -> Result<(), PqtyError> {
+    let Command::Registry {
+        tlpdb,
+        remote,
+        tlpdb_sha256,
+        runtime_files,
+    } = command
+    else {
+        unreachable!("registry handler received another command")
+    };
+    let registry =
+        context
+            .config
+            .registry_request(None, remote, context.offline, context.allow_insecure)?;
+    let index = if !runtime_files && registry.is_none() {
+        crate::TlpdbIndex::load_installed(
+            tlpdb
+                .as_deref()
+                .ok_or_else(|| PqtyError::Usage("provide --tlpdb or --remote".into()))?,
+        )?
+    } else {
+        load_tlpdb_index(tlpdb, registry.as_ref())?
+    };
+    if let Some(expected) = tlpdb_sha256 {
+        validate_tlpdb_digest(&index, &expected)?;
     }
-    if schema == "pqty.capabilities/v3" {
-        capabilities["font_maps_schema"] = crate::FONT_MAPS_SCHEMA.into();
-        capabilities["file_export"] = true.into();
+    let mut artifact =
+        serde_json::json!({"schema":"pqty.registry/v1", "metadata_digest":index.metadata_digest()});
+    if runtime_files {
+        artifact["file_owners"] = serde_json::to_value(index.runtime_file_owners())?;
     }
-    println!("{}", serde_json::to_string_pretty(&capabilities)?);
+    publish_json(&artifact, None)
+}
+
+fn run_package(context: &ExecutionContext, command: Command) -> Result<(), PqtyError> {
+    let Command::Package {
+        provider,
+        file,
+        tlpdb,
+        tlpdb_url,
+        remote,
+        tlpdb_sha256,
+        store,
+        output,
+    } = command
+    else {
+        unreachable!("package handler received another command")
+    };
+
+    let registry = context.config.registry_request(
+        tlpdb_url,
+        remote,
+        context.offline,
+        context.allow_insecure,
+    )?;
+    let index = load_tlpdb_index(tlpdb, registry.as_ref())?;
+    if let Some(expected) = tlpdb_sha256 {
+        validate_tlpdb_digest(&index, &expected)?;
+    }
+    let provider = match (provider, file) {
+        (Some(provider), None) => provider,
+        (None, Some(file)) => crate::provider_for_file(&index, &file)?,
+        _ => {
+            return Err(PqtyError::Usage(
+                "provide one of --provider or --file".into(),
+            ));
+        }
+    };
+    let source = byte_source(registry.as_ref(), &index)?;
+    let package =
+        crate::prepare_package(&index, &provider, &source, &context.config.store_dir(store))?;
+    publish_json(&package, output.as_deref())
+}
+
+fn run_mirror(context: &ExecutionContext, command: Command) -> Result<(), PqtyError> {
+    let Command::Mirror {
+        tlpdb,
+        tlpdb_url,
+        remote,
+        tlpdb_sha256,
+        store,
+        output,
+    } = command
+    else {
+        unreachable!("mirror handler received another command")
+    };
+    let registry = context.config.registry_request(
+        tlpdb_url,
+        remote,
+        context.offline,
+        context.allow_insecure,
+    )?;
+    let index = load_tlpdb_index(tlpdb, registry.as_ref())?;
+    if let Some(expected) = tlpdb_sha256 {
+        validate_tlpdb_digest(&index, &expected)?;
+    }
+    crate::mirror_packages(
+        &index,
+        &byte_source(registry.as_ref(), &index)?,
+        &context.config.store_dir(store),
+        &output,
+    )
+}
+
+fn run_package_file(context: &ExecutionContext, command: Command) -> Result<(), PqtyError> {
+    let Command::PackageFile {
+        manifest,
+        store,
+        path,
+        output,
+    } = command
+    else {
+        unreachable!("package handler received another command")
+    };
+
+    let bytes = crate::store::read_bounded(
+        std::fs::File::open(&manifest).map_err(|source| PqtyError::Io {
+            path: manifest.clone(),
+            source,
+        })?,
+        crate::MAX_TLPDB_EXPANDED_BYTES,
+        "package manifest",
+    )?;
+    let package: crate::PackageManifest = serde_json::from_slice(&bytes)?;
+    crate::export_package_file(&package, &context.config.store_dir(store), &path, &output)?;
+    Ok(())
+}
+
+fn run_capabilities(_schema: &str) -> Result<(), PqtyError> {
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&Capabilities::current())?
+    );
     Ok(())
 }
 

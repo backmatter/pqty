@@ -347,6 +347,13 @@ mod archive;
 mod bundle;
 mod container;
 mod file_export;
+mod mirror;
+mod package;
+pub use mirror::mirror_packages;
+pub use package::{
+    PACKAGE_SCHEMA, PackageFile, PackageManifest, copy_package_file, export_package_file,
+    prepare_package, provider_for_file,
+};
 mod file_manifest;
 mod stream;
 pub use file_export::{copy_verified_file, export_file};

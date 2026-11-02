@@ -142,7 +142,9 @@ fn finish_tlpdb_record(
     })?;
     validate_tlpdb_record(record, &current, &contents.packages)?;
     update_release(record, &current, &mut contents.release)?;
-    if index_files {
+    // Reserved distribution metadata may list source-image or generated files
+    // without installable package containers. It is not a runtime provider.
+    if index_files && !current.starts_with("00texlive.") {
         index_runfiles(
             record,
             &current,
@@ -431,6 +433,29 @@ fn normalize_provider_indexes(
 }
 
 impl TlpdbIndex {
+    /// Snapshot-bound basename and exact TDS-path ownership for runtime inputs.
+    /// Hosts keep this index server-side to answer misses without loading a
+    /// registry or starting a package preparer for every speculative TeX probe.
+    /// Ambiguous names retain every candidate and must not select one silently.
+    #[must_use]
+    pub fn runtime_file_owners(&self) -> BTreeMap<String, Vec<String>> {
+        self.by_file
+            .iter()
+            .chain(&self.by_path)
+            .filter_map(|(name, owners)| {
+                let owners: Vec<_> = owners
+                    .iter()
+                    .filter(|owner| {
+                        self.packages
+                            .get(*owner)
+                            .is_some_and(IndexPackage::belongs_to_package_layer)
+                    })
+                    .cloned()
+                    .collect();
+                (!owners.is_empty()).then(|| (name.clone(), owners))
+            })
+            .collect()
+    }
     /// Load a TeX Live package database from disk.
     ///
     /// # Errors

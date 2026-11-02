@@ -1,0 +1,153 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/backmatter/pqty/main/schemas/pqty.package.schema.json",
+  "title": "pqty.package/v1",
+  "type": "object",
+  "required": [
+    "schema",
+    "fingerprint",
+    "registry",
+    "provider",
+    "version",
+    "dependencies",
+    "font_maps",
+    "integrity",
+    "files"
+  ],
+  "properties": {
+    "schema": {
+      "const": "pqty.package/v1"
+    },
+    "fingerprint": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "registry": {
+      "$ref": "#/$defs/registry"
+    },
+    "provider": {
+      "type": "string",
+      "minLength": 1
+    },
+    "version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "container_checksum": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{128}$"
+    },
+    "container_size": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 268435456
+    },
+    "dependencies": {
+      "$ref": "#/$defs/string_array"
+    },
+    "font_maps": {
+      "$ref": "#/$defs/string_array"
+    },
+    "integrity": {
+      "type": "string",
+      "pattern": "^sha256-[A-Za-z0-9+/]{43}=$"
+    },
+    "files": {
+      "type": "array",
+      "maxItems": 100000,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "tds_path",
+          "kind",
+          "digest",
+          "size"
+        ],
+        "properties": {
+          "tds_path": {
+            "$ref": "#/$defs/virtual_path"
+          },
+          "kind": {
+            "$ref": "#/$defs/resource_kind"
+          },
+          "digest": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 134217728
+          }
+        }
+      }
+    }
+  },
+  "additionalProperties": false,
+  "dependentRequired": {
+    "container_checksum": ["container_size"],
+    "container_size": ["container_checksum"]
+  },
+  "$defs": {
+    "virtual_path": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?![A-Za-z]:)(?!.*\\\\)(?!.*[\\u0000-\\u001F\\u007F])(?!.*(?:^|/)(?:\\.|\\.\\.)(?:/|$))(?!.*//).+$"
+    },
+    "string_array": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "registry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "url",
+        "metadata_digest"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "const": "tlnet"
+        },
+        "url": {
+          "type": "string",
+          "minLength": 1
+        },
+        "snapshot": {
+          "type": "string"
+        },
+        "metadata_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        }
+      }
+    },
+    "resource_kind": {
+      "enum": [
+        "tex",
+        "bibliography",
+        "font-metric",
+        "virtual-font",
+        "type1-font",
+        "open-type-font",
+        "true-type-font",
+        "font-family",
+        "map",
+        "encoding",
+        "hyphenation",
+        "format",
+        "binary",
+        "data"
+      ]
+    }
+  }
+}

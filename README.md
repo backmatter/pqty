@@ -112,6 +112,16 @@ directories. Files resolved through them enter the source digest set.
 See the [complete CLI reference](docs/cli.md) or run
 `pqty <command> --help`.
 
+For complete static publication, `pqty mirror` prepares every runtime provider
+serially and publishes a completion catalog only after verifying all public
+objects. Hosts can then serve the catalog read-only without request-time
+downloads or package processes.
+
+For lazy browser package loading, a host can prepare packages without project
+sources and publish verified files from a shared server cache. The small
+browser adapter persists only requested files using native browser storage.
+See [package serving](docs/package-serving.md).
+
 ## Snapshots and offline use
 
 Remote resolution accepts:

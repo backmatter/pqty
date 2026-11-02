@@ -5,6 +5,10 @@ use crate::{
     TRACE_REPORT_SCHEMA, TRACE_SCHEMA,
 };
 
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "Protocol flags advertise independent features, not alternative states."
+)]
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Capabilities {
@@ -17,6 +21,13 @@ pub(crate) struct Capabilities {
     pub(crate) convergence_report_schema: String,
     pub(crate) progress_schema: String,
     pub(crate) bundle_schema: String,
+    pub(crate) languages_schema: String,
+    pub(crate) file_manifest_schema: String,
+    pub(crate) font_maps_schema: String,
+    pub(crate) language_requirements: bool,
+    pub(crate) file_export: bool,
+    pub(crate) package_schema: String,
+    pub(crate) package_mirror: bool,
     /// `install --reuse-matching-tree` is available.
     pub(crate) install_reuse_matching_tree: bool,
 }
@@ -34,6 +45,13 @@ impl Capabilities {
             progress_schema: PROGRESS_SCHEMA.to_string(),
             bundle_schema: crate::BUNDLE_SCHEMA.to_string(),
             install_reuse_matching_tree: true,
+            languages_schema: crate::LANGUAGES_SCHEMA.to_string(),
+            file_manifest_schema: crate::FILE_MANIFEST_SCHEMA.to_string(),
+            font_maps_schema: crate::FONT_MAPS_SCHEMA.to_string(),
+            language_requirements: true,
+            file_export: true,
+            package_schema: crate::PACKAGE_SCHEMA.to_string(),
+            package_mirror: true,
         }
     }
 }

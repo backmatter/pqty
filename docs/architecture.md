@@ -178,7 +178,13 @@ artifact retains snapshot-bound language metadata; `pqty.files/v1` projects
 verified store bytes to a public hash/size index for lazy consumers. Neither
 changes existing v1 lock or environment formats. See the
 [language and lazy-input guide](lazy-inputs.md) for the engine and transport
-boundaries and the opt-in v2 capabilities contract.
+boundaries and the single v1 capabilities contract.
+
+Standalone package preparation for immutable hosting and the browser disk-cache
+adapter are described in [package serving](package-serving.md). Server-side
+resolution is shared across projects; compilation and source synchronization
+remain outside pqty. Clients receive file metadata for selected providers and
+fetch individual files, rather than the distribution registry or containers.
 
 ## Code map
 

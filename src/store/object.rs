@@ -13,17 +13,26 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 
 use crate::{
-    LockFile, LockedFile, MAX_CLOSURE_EXPANDED_BYTES, MAX_CLOSURE_RUNFILES,
-    MAX_CONTAINER_EXPANDED_BYTES, MAX_PROVIDER_RUNFILES, PackageRegistry, PqtyError,
-    ResolvedPackage, progress, resource_kind, temporary_file, unique_sibling,
+    LockFile, MAX_CLOSURE_EXPANDED_BYTES, MAX_CLOSURE_RUNFILES, MAX_CONTAINER_EXPANDED_BYTES,
+    MAX_PROVIDER_RUNFILES, PackageRegistry, PqtyError, ResolvedPackage, progress, resource_kind,
+    temporary_file, unique_sibling,
 };
 
 /// Fetch and verify one provider's runfiles into the content-addressable store.
 pub(super) struct ProviderMaterialization {
     pub(super) integrity: String,
     pub(super) store_key: String,
-    pub(super) files: Vec<LockedFile>,
+    pub(super) files: Vec<PreparedFile>,
     pub(super) expanded_bytes: u64,
+}
+
+// Metadata produced while store_reader verifies the bytes. Keeping it here
+// avoids rereading content just to project another public package artifact.
+pub(super) struct PreparedFile {
+    pub(super) tds_path: String,
+    pub(super) kind: crate::ResourceKind,
+    pub(super) digest: String,
+    pub(super) size: u64,
 }
 
 pub(super) const STORE_PACKAGE_SCHEMA: &str = "pqty.store-package/v1";
@@ -101,9 +110,11 @@ pub(super) fn materialize_provider(
                 .strip_prefix("texmf-dist/")
                 .unwrap_or(relative)
                 .to_owned();
-            locked_files.push(LockedFile {
+            locked_files.push(PreparedFile {
                 kind: resource_kind(&tds_path),
                 tds_path: tds_path.clone(),
+                digest: format!("sha256:{}", object.digest),
+                size: object.size,
             });
             stored_files.push(StoredFile {
                 tds_path,

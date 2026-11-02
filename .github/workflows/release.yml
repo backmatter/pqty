@@ -124,6 +124,8 @@ jobs:
           cp LICENSE README.md "dist/$package/"
           cp -R schemas "dist/$package/"
           cp -R docs "dist/$package/"
+          mkdir -p "dist/$package/adapters"
+          cp -R adapters/browser "dist/$package/adapters/"
           tar -C dist -czf "dist/$package.tar.gz" "$package"
           mkdir -p dist/smoke
           tar -C dist/smoke -xzf "dist/$package.tar.gz"
@@ -172,6 +174,8 @@ jobs:
           Copy-Item LICENSE, README.md "dist/$package/"
           Copy-Item -Recurse schemas "dist/$package/"
           Copy-Item -Recurse docs "dist/$package/"
+          New-Item -ItemType Directory -Force "dist/$package/adapters" | Out-Null
+          Copy-Item -Recurse adapters/browser "dist/$package/adapters/"
           Compress-Archive -Path "dist/$package" -DestinationPath "dist/$package.zip"
           Expand-Archive "dist/$package.zip" -DestinationPath "dist/smoke"
           & "dist/smoke/$package/pqty.exe" --version

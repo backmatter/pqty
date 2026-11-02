@@ -5,7 +5,28 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.4](https://github.com/backmatter/pqty/compare/v0.1.3...v0.1.4) - 2026-11-02
+
+### Changed
+
+- Exclude reserved TeX Live distribution metadata from package-file ownership;
+  source-image and generated-file records have no installable containers.
+
+- Consolidate all capabilities into `pqty.capabilities/v1`; remove intermediate
+  v2/v3 selectors. Consumers must accept the documented v1 capability fields.
+
+### Added
+
+- Add standalone serial `mirror` publication of all runtime providers, with
+  verified resumable public objects and a completion catalog published last.
+
+- Prepare and cache standalone `pqty.package/v1` manifests without project
+  sources or TEXMF installations. Resolve unique filenames and export verified
+  individual files for immutable hosting.
+- Add a standalone browser-worker adapter using streaming verification and
+  native OPFS persistence, with direct reads into WASM memory and no whole-file
+  JavaScript byte buffers or compatibility storage branches.
+- Export snapshot-bound runtime filename ownership for stateless host lookups.
 
 ## [0.1.3](https://github.com/backmatter/pqty/compare/v0.1.2...v0.1.3) - 2026-11-02
 

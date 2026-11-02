@@ -45,6 +45,27 @@
     },
     "install_reuse_matching_tree": {
       "type": "boolean"
+    },
+    "languages_schema": {
+      "const": "pqty.languages/v1"
+    },
+    "file_manifest_schema": {
+      "const": "pqty.files/v1"
+    },
+    "language_requirements": {
+      "const": true
+    },
+    "font_maps_schema": {
+      "const": "pqty.font-maps/v1"
+    },
+    "file_export": {
+      "const": true
+    },
+    "package_schema": {
+      "const": "pqty.package/v1"
+    },
+    "package_mirror": {
+      "type": "boolean"
     }
   },
   "additionalProperties": false

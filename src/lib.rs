@@ -146,8 +146,10 @@ pub(crate) use registry::{
 mod store;
 pub use store::{
     BUNDLE_SCHEMA, FILE_MANIFEST_SCHEMA, FileManifest, ManifestFile, MaterializeReport,
-    PackageByteSource, copy_verified_file, export_bundle, export_file, export_file_manifest,
-    hydrate_lock, import_bundle, install_locked, materialize_from_store,
+    PACKAGE_SCHEMA, PackageByteSource, PackageFile, PackageManifest, copy_package_file,
+    copy_verified_file, export_bundle, export_file, export_file_manifest, export_package_file,
+    hydrate_lock, import_bundle, install_locked, materialize_from_store, mirror_packages,
+    prepare_package, provider_for_file,
 };
 #[cfg(test)]
 use store::{BoundedWriter, take_container_runfile};

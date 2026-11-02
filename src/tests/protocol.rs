@@ -2,14 +2,14 @@
 fn machine_readable_schemas_match_the_rust_protocol_constants() {
     for (text, expected_id, expected_const) in [
         (
+            include_str!("../../schemas/pqty.package.schema.json"),
+            "https://raw.githubusercontent.com/backmatter/pqty/main/schemas/pqty.package.schema.json",
+            crate::PACKAGE_SCHEMA,
+        ),
+        (
             include_str!("../../schemas/pqty.font-maps.schema.json"),
             "https://raw.githubusercontent.com/backmatter/pqty/main/schemas/pqty.font-maps.schema.json",
             crate::FONT_MAPS_SCHEMA,
-        ),
-        (
-            include_str!("../../schemas/pqty.capabilities-v3.schema.json"),
-            "https://raw.githubusercontent.com/backmatter/pqty/main/schemas/pqty.capabilities-v3.schema.json",
-            "pqty.capabilities/v3",
         ),
         (
             include_str!("../../schemas/pqty.files.schema.json"),
@@ -20,11 +20,6 @@ fn machine_readable_schemas_match_the_rust_protocol_constants() {
             include_str!("../../schemas/pqty.languages.schema.json"),
             "https://raw.githubusercontent.com/backmatter/pqty/main/schemas/pqty.languages.schema.json",
             crate::LANGUAGES_SCHEMA,
-        ),
-        (
-            include_str!("../../schemas/pqty.capabilities-v2.schema.json"),
-            "https://raw.githubusercontent.com/backmatter/pqty/main/schemas/pqty.capabilities-v2.schema.json",
-            "pqty.capabilities/v2",
         ),
         (
             include_str!("../../schemas/pqty.capabilities.schema.json"),
@@ -180,17 +175,7 @@ fn golden_v1_artifacts_are_real_outputs_and_remain_readable() {
     assert_eq!(golden_resolved.stage, LockStage::Resolved);
     assert_eq!(golden_exact.stage, LockStage::Exact);
 
-    let mut capabilities =
-        serde_json::to_value(crate::cli::protocol::Capabilities::current()).unwrap();
-    // Optional additions to the v1 document; the frozen fixture predates them.
-    capabilities
-        .as_object_mut()
-        .unwrap()
-        .remove("install_reuse_matching_tree");
-    let mut golden_capabilities: serde_json::Value =
-        serde_json::from_str(include_str!("../../tests/golden/v1/capabilities.json")).unwrap();
-    golden_capabilities["version"] = serde_json::json!(env!("CARGO_PKG_VERSION"));
-    assert_eq!(capabilities, golden_capabilities);
+    assert_capabilities_v1();
 
     let mut source = MemorySourceTree::default();
     source.insert(
@@ -413,3 +398,29 @@ use crate::{
     hydrate_lock, read_lock, read_trace, resolve, scan_source, stable_convergence_report,
     validate_lock,
 };
+
+fn assert_capabilities_v1() {
+    let mut capabilities =
+        serde_json::to_value(crate::cli::protocol::Capabilities::current()).unwrap();
+    // Explicit additive capabilities share v1; the original fixture remains
+    // byte-for-byte intact and still validates against the current schema.
+    for (name, expected) in [
+        ("install_reuse_matching_tree", serde_json::json!(true)),
+        ("language_requirements", serde_json::json!(true)),
+        ("file_export", serde_json::json!(true)),
+        ("package_mirror", serde_json::json!(true)),
+        ("languages_schema", serde_json::json!("pqty.languages/v1")),
+        ("file_manifest_schema", serde_json::json!("pqty.files/v1")),
+        ("font_maps_schema", serde_json::json!("pqty.font-maps/v1")),
+        ("package_schema", serde_json::json!("pqty.package/v1")),
+    ] {
+        assert_eq!(
+            capabilities.as_object_mut().unwrap().remove(name),
+            Some(expected)
+        );
+    }
+    let mut golden_capabilities: serde_json::Value =
+        serde_json::from_str(include_str!("../../tests/golden/v1/capabilities.json")).unwrap();
+    golden_capabilities["version"] = serde_json::json!(env!("CARGO_PKG_VERSION"));
+    assert_eq!(capabilities, golden_capabilities);
+}

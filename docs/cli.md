@@ -1,5 +1,11 @@
 # CLI and configuration reference
 
+`registry --runtime-files --remote YYYY-MM-DD --tlpdb-sha256 sha256:...` exports
+the pinned registry digest and runtime basename/exact-TDS-path ownership as
+`pqty.registry/v1`. Hosts keep this index server-side to answer absent or
+ambiguous requests without starting package preparation. The ordinary installed
+`registry --tlpdb FILE` response is unchanged.
+
 This page documents every command and option in the standalone `pqty` binary.
 For a managed source-to-PDF workflow that includes pqty, use
 [texe](https://github.com/backmatter/texe).
@@ -61,10 +67,34 @@ pqty capabilities
 Prints a machine-readable description of the schemas and CLI protocols
 supported by the binary, including the JSON Lines progress protocol.
 
-Use `capabilities --schema pqty.capabilities/v2` to negotiate language
-requirements and the verified file manifest. Use
-`capabilities --schema pqty.capabilities/v3` for typed font-map metadata and
-single-file byte export as well. The default remains v1; v2 is unchanged.
+`capabilities` advertises language requirements, verified file manifests,
+font-map metadata, individual file export, and standalone package preparation
+in the single `pqty.capabilities/v1` contract. An explicit
+`--schema pqty.capabilities/v1` selects the same response. Other schema versions
+are rejected.
+
+### `package` and `package-file`
+
+```sh
+pqty --no-config package --file foo.sty --remote 2026-07-26 \
+  --tlpdb-sha256 <pinned-metadata-sha256> --store /cache/pqty -o foo.package.json
+pqty --no-config --offline package-file --manifest foo.package.json \
+  --store /cache/pqty --path tex/latex/foo/foo.sty -o /public/objects/<sha256>
+```
+
+`package` prepares one provider and emits `pqty.package/v1` without reading a
+project or creating a TEXMF tree. `--provider NAME` selects a provider directly;
+`--file` accepts an exact TDS path or an unambiguous literal basename. Unknown,
+unsafe and ambiguous requests fail. Dependencies are retained as metadata;
+this command does not install every dependency speculatively.
+
+Checksummed remote providers reuse the server's prepared manifest and shared
+objects across invocations. Missing objects are recovered from the pinned
+container; offline misses fail. Local mutable source trees are read again.
+`package-file` exports just one verified file atomically, works offline, and
+prints no file bytes or protocol JSON on stdout. Servers publish that output
+under its content digest with immutable cache headers. See the
+[server and browser package guide](package-serving.md).
 
 ### `scan`
 
@@ -383,3 +413,11 @@ The separate
 [`pqty-fls` adapter](https://github.com/backmatter/pqty/blob/main/adapters/fls/README.md)
 converts recorder output from kpathsea-based engines into `pqty.trace/v1`; its
 guide documents the adapter CLI, root classification, and portable paths.
+
+### Complete immutable package mirror
+
+`pqty mirror --remote YYYY-MM-DD --tlpdb-sha256 sha256:HEX --store STORE --output ROOT`
+prepares and publishes all runtime providers serially. Registry and offline
+selection follow `package`; local `--tlpdb` or explicit `--tlpdb-url` are also
+supported. See [publication layout and completion semantics](package-serving.md#complete-publication-before-serving).
+Capabilities v1 advertises this command as `package_mirror: true`.

@@ -8,14 +8,15 @@ files without depending on pqty's private store layout.
 ## Negotiation and compatibility
 
 ```sh
-pqty --no-config capabilities --schema pqty.capabilities/v2
+pqty --no-config capabilities
 ```
 
-The opt-in v2 capabilities contract advertises `languages_schema`,
-`file_manifest_schema`, and `language_requirements`, alongside the existing
-protocol fields. Plain `capabilities` continues to emit v1. Unsupported
-capability schema selectors fail. Existing v1 lock, environment, trace, and
-bundle formats are unchanged; their frozen compatibility fixtures remain valid.
+The single `pqty.capabilities/v1` contract advertises `languages_schema`,
+`file_manifest_schema`, `font_maps_schema`, `package_schema`,
+`language_requirements` and `file_export`, alongside the existing protocol
+fields. Explicit `--schema pqty.capabilities/v1` is equivalent. Intermediate
+capabilities v2/v3 selectors are removed in 0.1.4. Existing lock, environment, trace and bundle formats remain v1; their
+frozen fixture bytes are unchanged.
 
 The Rust API adds `IndexPackage.hyphenation` and
 `IndexPackage.font_map_declarations`; callers constructing that public struct
@@ -197,15 +198,13 @@ copying; bundle and v1 provider identities are unchanged.
 ## Typed font-map metadata
 
 ```sh
-pqty --no-config capabilities --schema pqty.capabilities/v3
+pqty --no-config capabilities
 pqty --no-config --offline font-maps --lock pqty.lock -o font-maps.json
 ```
 
-Opt-in v3 capabilities include the unchanged v2 fields plus `font_maps_schema`
-(`pqty.font-maps/v1`) and `file_export` (`true`). Default v1 and opted-in v2
-capabilities, and all existing lock/environment/file/bundle schemas, remain
-unchanged. The existing v1 `font_maps` list retains its original concrete
-Map/MixedMap filename semantics.
+Capabilities v1 includes `font_maps_schema` (`pqty.font-maps/v1`) and
+`file_export` (`true`). The existing v1 `font_maps` list retains its original
+concrete Map/MixedMap filename semantics.
 
 [`pqty.font-maps/v1`](../schemas/pqty.font-maps.schema.json) contains `schema`,
 `registry`, `environment_fingerprint`, and `maps`. It projects every declaration

@@ -99,7 +99,14 @@ pub(super) enum Command {
     /// Inspect the exact installed provider index without resolving a project.
     Registry {
         #[arg(long)]
-        tlpdb: PathBuf,
+        tlpdb: Option<PathBuf>,
+        #[arg(long, conflicts_with = "tlpdb")]
+        remote: Option<RemoteSelector>,
+        #[arg(long)]
+        tlpdb_sha256: Option<String>,
+        /// Include runtime filename ownership for a host's snapshot-bound lookup cache.
+        #[arg(long)]
+        runtime_files: bool,
     },
     /// Export verified locked package bytes for another machine or offline use.
     Bundle {
@@ -121,9 +128,62 @@ pub(super) enum Command {
     },
     /// Print the stable JSON and CLI protocols supported by this binary.
     Capabilities {
-        /// Select the capabilities contract. The default remains v1.
-        #[arg(long, default_value = "pqty.capabilities/v1", value_parser = ["pqty.capabilities/v1", "pqty.capabilities/v2", "pqty.capabilities/v3"])]
+        /// Select the capabilities contract (v1).
+        #[arg(long, default_value = "pqty.capabilities/v1", value_parser = ["pqty.capabilities/v1"])]
         schema: String,
+    },
+    /// Prepare one provider for lazy clients, without reading project sources.
+    Package {
+        /// Registry provider name, mutually exclusive with --file.
+        #[arg(long, required_unless_present = "file", conflicts_with = "file")]
+        provider: Option<String>,
+        /// Exact TDS path or literal basename with unique registry ownership.
+        #[arg(
+            long,
+            required_unless_present = "provider",
+            conflicts_with = "provider"
+        )]
+        file: Option<String>,
+        #[arg(long, conflicts_with = "tlpdb_url")]
+        tlpdb: Option<PathBuf>,
+        #[arg(long, conflicts_with = "tlpdb")]
+        tlpdb_url: Option<String>,
+        #[arg(long, value_name = "latest|YYYY-MM-DD", conflicts_with_all = ["tlpdb", "tlpdb_url"])]
+        remote: Option<RemoteSelector>,
+        /// Expected SHA-256 of the decompressed registry metadata.
+        #[arg(long)]
+        tlpdb_sha256: Option<String>,
+        #[arg(long)]
+        store: Option<PathBuf>,
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
+    /// Publish all runtime packages before serving requests (no project required).
+    Mirror {
+        #[arg(long, conflicts_with = "tlpdb_url")]
+        tlpdb: Option<PathBuf>,
+        #[arg(long, conflicts_with = "tlpdb")]
+        tlpdb_url: Option<String>,
+        #[arg(long, value_name = "latest|YYYY-MM-DD", conflicts_with_all = ["tlpdb", "tlpdb_url"])]
+        remote: Option<RemoteSelector>,
+        #[arg(long)]
+        tlpdb_sha256: Option<String>,
+        #[arg(long)]
+        store: Option<PathBuf>,
+        /// Root for public objects, provider manifests and completion catalogs.
+        #[arg(short, long)]
+        output: PathBuf,
+    },
+    /// Atomically export one prepared package file for immutable hosting.
+    PackageFile {
+        #[arg(long)]
+        manifest: PathBuf,
+        #[arg(long)]
+        store: Option<PathBuf>,
+        #[arg(long)]
+        path: String,
+        #[arg(short, long)]
+        output: PathBuf,
     },
     /// Export verified package file hashes and sizes, without installing a tree.
     Files {

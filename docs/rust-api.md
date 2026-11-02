@@ -130,6 +130,19 @@ and unresolved profile templates for an exact lock. `FontMapManifest::validate`
 binds that projection to the lock and its registry; hosts own profile selection
 and map generation.
 
+### Standalone packages for lazy clients
+
+`provider_for_file` resolves a literal filename or exact TDS path with unique
+ownership. `prepare_package` prepares one provider and returns
+`PackageManifest` (`pqty.package/v1`) without a project lock or synthetic source.
+`PackageManifest::validate_against` binds it to the registry snapshot;
+`validate` checks its metadata without a registry. `copy_package_file` and
+`export_package_file` stream a selected verified file offline, using the same
+object verification path as project-bound exports.
+
+The host owns HTTP routes, immutable publication and client authorization. See
+[package serving](package-serving.md).
+
 ### Runtime convergence
 
 `converge_trace` transactionally attempts to extend an exact lock with
@@ -151,3 +164,8 @@ See the
 [adapter guide](https://github.com/backmatter/pqty/blob/main/adapters/fls/README.md)
 and
 [generated API reference](https://docs.rs/pqty-fls).
+
+`mirror_packages` publishes a complete runtime registry to a host-owned directory
+using the same verified package/store path. It processes providers serially,
+reuses verified public objects, and publishes the snapshot completion catalog
+last. See the [mirror layout](package-serving.md#complete-publication-before-serving).

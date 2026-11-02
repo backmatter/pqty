@@ -85,9 +85,9 @@ fn every_supported_pqty_command_has_a_contract_smoke_case() {
 fn language_and_lazy_file_contracts_work_offline_across_portable_stores() {
     let (root, tlpdb) = create_language_fixture();
     let capabilities =
-        run_ok(pqty(&root).args(["capabilities", "--schema", "pqty.capabilities/v2"]));
+        run_ok(pqty(&root).args(["capabilities", "--schema", "pqty.capabilities/v1"]));
     validate_json_schema(
-        include_str!("../schemas/pqty.capabilities-v2.schema.json"),
+        include_str!("../schemas/pqty.capabilities.schema.json"),
         &capabilities.stdout,
     );
     let mut query = pqty(&root);
@@ -707,9 +707,9 @@ fn typed_maps_and_single_file_exports_have_negotiated_offline_cli_contracts() {
     }
     fs::write(root.join("main.tex"), br"\usepackage{demo}").unwrap();
     let capabilities =
-        run_ok(pqty(&root).args(["capabilities", "--schema", "pqty.capabilities/v3"]));
+        run_ok(pqty(&root).args(["capabilities", "--schema", "pqty.capabilities/v1"]));
     validate_json_schema(
-        include_str!("../schemas/pqty.capabilities-v3.schema.json"),
+        include_str!("../schemas/pqty.capabilities.schema.json"),
         &capabilities.stdout,
     );
     let mut lock = pqty(&root);
@@ -751,6 +751,62 @@ fn typed_maps_and_single_file_exports_have_negotiated_offline_cli_contracts() {
     file.args(["--path", "absent.map"]);
     assert!(!file.output().unwrap().status.success());
     assert_eq!(fs::read(root.join("export.map")).unwrap(), b"% fixture\n");
+    make_tree_writable(&root);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn standalone_package_commands_need_no_project_and_export_only_one_file() {
+    let (root, tlpdb) = create_fixture();
+    fs::remove_file(root.join("main.tex")).unwrap();
+    let mut command = pqty(&root);
+    command.args([
+        "--offline",
+        "package",
+        "--file",
+        "foo.sty",
+        "--store",
+        "store",
+        "--output",
+        "foo.package.json",
+    ]);
+    arg_path(&mut command, "--tlpdb", &tlpdb);
+    run_ok(&mut command);
+    let artifact = fs::read(root.join("foo.package.json")).unwrap();
+    validate_json_schema(
+        include_str!("../schemas/pqty.package.schema.json"),
+        &artifact,
+    );
+    let package: pqty::PackageManifest = serde_json::from_slice(&artifact).unwrap();
+    assert_eq!(package.provider, "foo");
+    assert_eq!(package.files.len(), 1);
+    assert!(!root.join("main.tex").exists());
+    assert!(!root.join("pqty.lock").exists());
+    let output = run_ok(pqty(&root).args([
+        "--offline",
+        "package-file",
+        "--manifest",
+        "foo.package.json",
+        "--store",
+        "store",
+        "--path",
+        "tex/latex/foo/foo.sty",
+        "--output",
+        "public.sty",
+    ]));
+    assert!(output.stdout.is_empty());
+    assert_eq!(fs::read(root.join("public.sty")).unwrap(), b"% foo");
+    for version in ["v2", "v3"] {
+        let result = pqty(&root)
+            .args([
+                "capabilities",
+                "--schema",
+                &format!("pqty.capabilities/{version}"),
+            ])
+            .output()
+            .unwrap();
+        assert!(!result.status.success());
+    }
     make_tree_writable(&root);
     fs::remove_dir_all(root).unwrap();
 }

@@ -61,7 +61,58 @@ fn copy_file(
         .ok_or_else(|| {
             PqtyError::Usage("provider manifest is missing the requested file".into())
         })?;
-    let digest = stored_file_digest(&stored.digest)?;
+    let size = copy_object(store, &stored.digest, writer, verify_before_copy)?;
+    Ok(ManifestFile {
+        tds_path: tds_path.into(),
+        owner: provider.provider.clone(),
+        kind: locked.kind.clone(),
+        digest: stored.digest.clone(),
+        size,
+    })
+}
+
+/// Atomically export one verified locked file, leaving existing output intact
+/// on failure. No TEXMF tree is created and no network access is performed.
+///
+/// # Errors
+/// Returns errors from [`copy_verified_file`] or output publication. Outputs
+/// inside the package store are rejected to preserve store ownership.
+pub fn export_file(
+    lock: &LockFile,
+    store: &Path,
+    tds_path: &str,
+    output: &Path,
+) -> Result<ManifestFile, PqtyError> {
+    let parent = usable_parent(output);
+    let resolved_parent = fs::canonicalize(parent).map_err(|source| PqtyError::Io {
+        path: parent.into(),
+        source,
+    })?;
+    let resolved_store = fs::canonicalize(store).map_err(|source| PqtyError::Io {
+        path: store.into(),
+        source,
+    })?;
+    if resolved_parent.starts_with(&resolved_store) {
+        return Err(PqtyError::Usage(
+            "file export output must be outside the package store".into(),
+        ));
+    }
+    let mut file = temporary_file(output, "file")?;
+    // Private output is published only after its streamed digest is checked.
+    let metadata = copy_file(lock, store, tds_path, &mut file, false)?;
+    publish_file(file, output)?;
+    Ok(metadata)
+}
+
+// Both project locks and standalone package manifests use the same object
+// verification and streaming path. Raw writers receive only preverified bytes.
+pub(super) fn copy_object(
+    store: &Path,
+    expected_digest: &str,
+    writer: &mut impl Write,
+    verify_before_copy: bool,
+) -> Result<u64, PqtyError> {
+    let digest = stored_file_digest(expected_digest)?;
     let path = store.join(&digest[..2]).join(digest);
     if !fs::symlink_metadata(&path)
         .map_err(|source| PqtyError::Io {
@@ -117,44 +168,5 @@ fn copy_file(
             "corrupt or changed content-addressed store object".into(),
         ));
     }
-    Ok(ManifestFile {
-        tds_path: tds_path.into(),
-        owner: provider.provider.clone(),
-        kind: locked.kind.clone(),
-        digest: stored.digest.clone(),
-        size,
-    })
-}
-
-/// Atomically export one verified locked file, leaving existing output intact
-/// on failure. No TEXMF tree is created and no network access is performed.
-///
-/// # Errors
-/// Returns errors from [`copy_verified_file`] or output publication. Outputs
-/// inside the package store are rejected to preserve store ownership.
-pub fn export_file(
-    lock: &LockFile,
-    store: &Path,
-    tds_path: &str,
-    output: &Path,
-) -> Result<ManifestFile, PqtyError> {
-    let parent = usable_parent(output);
-    let resolved_parent = fs::canonicalize(parent).map_err(|source| PqtyError::Io {
-        path: parent.into(),
-        source,
-    })?;
-    let resolved_store = fs::canonicalize(store).map_err(|source| PqtyError::Io {
-        path: store.into(),
-        source,
-    })?;
-    if resolved_parent.starts_with(&resolved_store) {
-        return Err(PqtyError::Usage(
-            "file export output must be outside the package store".into(),
-        ));
-    }
-    let mut file = temporary_file(output, "file")?;
-    // Private output is published only after its streamed digest is checked.
-    let metadata = copy_file(lock, store, tds_path, &mut file, false)?;
-    publish_file(file, output)?;
-    Ok(metadata)
+    Ok(size)
 }

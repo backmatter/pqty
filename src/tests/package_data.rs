@@ -239,3 +239,24 @@ fn missing_literal_input_cannot_be_marked_hydrated_or_succeed_on_retry() {
     make_test_tree_writable(&root);
     fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn reserved_distribution_metadata_does_not_claim_runtime_package_files() {
+    let metadata = format!(
+        "{METADATA}\nname 00texlive.image\ncategory TLCore\nrunfiles size=1\n texmf-dist/fonts/map/pdftex/updmap/generated.map\n RELOC/tex/latex/alpha/alpha.sty\n"
+    );
+    let index = TlpdbIndex::parse(&metadata, Path::new("tlpkg/texlive.tlpdb"));
+    assert_eq!(index.providers_of_file("alpha.sty"), ["alpha"]);
+    assert!(index.providers_of_file("generated.map").is_empty());
+    assert!(
+        index.package("00texlive.image").is_some(),
+        "source metadata remains available"
+    );
+    assert!(
+        !index
+            .runtime_file_owners()
+            .values()
+            .flatten()
+            .any(|provider| provider.starts_with("00texlive."))
+    );
+}

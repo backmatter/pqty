@@ -91,7 +91,14 @@ pub fn hydrate_lock(
             }
             entry.integrity = Some(materialized.integrity);
             entry.store_key = Some(materialized.store_key);
-            entry.files = materialized.files;
+            entry.files = materialized
+                .files
+                .into_iter()
+                .map(|file| crate::LockedFile {
+                    tds_path: file.tds_path,
+                    kind: file.kind,
+                })
+                .collect();
         }
         let discovered = discovery.discover(lock, index, &store_dir)?;
         if add_runtime_providers(lock, index, discovered) == 0 {
