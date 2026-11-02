@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.3](https://github.com/backmatter/pqty/compare/v0.1.2...v0.1.3) - 2026-11-02
+
 ### Fixed
 
 - Reuse the HTTP agent's connection pool across package and metadata fetches.
@@ -31,6 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Export and import portable package bundles.
 - Stream provider ingestion, locked recovery, and bundle object publication
   through bounded buffers instead of retaining complete provider contents.
 - Export one verified locked file offline through `file`, `copy_verified_file`,
@@ -50,6 +53,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Opt-in `capabilities --schema pqty.capabilities/v2` negotiation for these
   contracts; the default capabilities output and existing v1 artifacts remain
   compatible. The Rust API adds `IndexPackage.hyphenation`.
+
+
+### Compatibility
+
+- Rust callers constructing `IndexPackage` must provide the new
+  `hyphenation` and `font_map_declarations` fields. This pre-1.0 patch release
+  intentionally includes those Rust API changes; it is not source-compatible
+  with every 0.1.2 Rust integration.
+- Existing CLI defaults and v1 artifact formats remain compatible. Capability
+  schemas v2 and v3 are opt-in.
+
+### Other
+
+- Reuse checked source for version-only releases.
+- Streaming and reuse changes are functionally tested; this release makes no
+  quantified speed or memory-reduction claims.
 
 ## [0.1.2](https://github.com/backmatter/pqty/compare/v0.1.1...v0.1.2) - 2026-10-28
 
