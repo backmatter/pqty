@@ -7,6 +7,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.3](https://github.com/backmatter/pqty/compare/v0.1.2...v0.1.3) - 2026-11-02
+
+### Fixed
+
+- Reuse the HTTP agent's connection pool across package and metadata fetches.
+- Retain verified runtime indexes and compact parsed requests only within a
+  hydration operation, rechecking resolution as new providers are added.
+- Own temporary files and bundle staging with `tempfile` so ordinary errors and
+  unwinding clean them up automatically. Keep atomic artifact replacement,
+  competing-writer checks, existing permissions, and persistent recovery data.
+
+- Delegate transfer buffering to standard I/O for package ingestion, download,
+  verification, and export. Callers and pqty implementation code no longer tune
+  transfer buffer sizes; artifact limits remain enforced.
+
+- Preserve declared TEXMF data dependencies across `Package`, `TLCore`, and
+  `ConTeXt` categories, including script and configuration data. Keep platform
+  binaries and distribution-root installer helpers outside file ownership lookup.
+- Resolve unique literal `\input` requests after project lookup, follow bare
+  literal inputs in package files, and refresh closures when input targets or
+  declared data dependencies change. Preserve existing v1 artifact formats.
+- Scan legacy text bytes without changing source digests or rewriting files;
+  dependency arguments still require valid UTF-8.
+
+### Added
+
+- Export and import portable package bundles.
+- Stream provider ingestion, locked recovery, and bundle object publication
+  through bounded buffers instead of retaining complete provider contents.
+- Export one verified locked file offline through `file`, `copy_verified_file`,
+  and atomic `export_file`, without a TEXMF tree or private store paths.
+- Preserve typed Map/MixedMap/KanjiMap declarations and profile templates in
+  `pqty.font-maps/v1`, exposed by `font-maps` and `font_map_manifest`.
+  Opt-in capabilities v3 advertises the new interfaces; v1 and v2 are unchanged.
+  The Rust API adds `IndexPackage.font_map_declarations`.
+
+- Resolve explicit language names and aliases from TeX Live `AddHyphen`
+  declarations, retaining loaders, patterns, exceptions, minima, and attributes.
+  `lock --require-language`, `require --language`, and `languages` use exact
+  snapshot-bound package ownership and preserve the existing v1 lock format.
+- Export verified per-file hashes and sizes with `files` and
+  `export_file_manifest`, without materializing another TEXMF tree or exposing
+  private store paths. Add closed `pqty.files/v1` and `pqty.languages/v1` schemas.
+- Opt-in `capabilities --schema pqty.capabilities/v2` negotiation for these
+  contracts; the default capabilities output and existing v1 artifacts remain
+  compatible. The Rust API adds `IndexPackage.hyphenation`.
+
+
+### Compatibility
+
+- Rust callers constructing `IndexPackage` must provide the new
+  `hyphenation` and `font_map_declarations` fields. This pre-1.0 patch release
+  intentionally includes those Rust API changes; it is not source-compatible
+  with every 0.1.2 Rust integration.
+- Existing CLI defaults and v1 artifact formats remain compatible. Capability
+  schemas v2 and v3 are opt-in.
+
+### Other
+
+- Reuse checked source for version-only releases.
+- Streaming and reuse changes are functionally tested; this release makes no
+  quantified speed or memory-reduction claims.
+
 ## [0.1.2](https://github.com/backmatter/pqty/compare/v0.1.1...v0.1.2) - 2026-10-28
 
 ### Fixed

@@ -34,7 +34,7 @@ fn make_test_writable(path: &Path) {
     fs::set_permissions(path, permissions).unwrap();
 }
 
-fn make_test_tree_writable(path: &Path) {
+pub(crate) fn make_test_tree_writable(path: &Path) {
     if !path.exists() {
         return;
     }
@@ -91,8 +91,8 @@ fn convergence_fixture() -> (PathBuf, TlpdbIndex, LockFile) {
         "name engine-core\n",
         "category TLCore\n",
         "revision 4\n",
-        "runfiles size=1\n",
-        " texmf-dist/tex/generic/engine/engine.tex\n",
+        "binfiles arch=test size=1\n",
+        " bin/test/engine\n",
     );
     fs::write(&tlpdb, metadata).unwrap();
     for (path, bytes) in [
@@ -144,8 +144,13 @@ fn convergence_fixture() -> (PathBuf, TlpdbIndex, LockFile) {
 
 mod environment;
 mod hydration;
+mod language;
+mod package_data;
 mod protocol;
 mod registry;
 mod scanner;
 mod source;
 mod store;
+
+mod font_map;
+mod streaming;

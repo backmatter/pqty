@@ -157,6 +157,15 @@ changing artifact JSON on stdout or the environment fingerprint.
 converts `.fls` recorder output from kpathsea-based engines into the common
 trace format.
 
+Hosts can explicitly require complete language data with `--require-language`
+or `require --language`, query snapshot-bound declarations with `languages`,
+export verified file hashes and sizes with `files`, and copy one locked file
+with `file`. Typed font-map declarations and profile templates are available
+through `font-maps`. See the
+[language and lazy-input guide](docs/lazy-inputs.md) for compatibility negotiation
+and offline browser-consumer contracts. Engines still activate and validate
+patterns; hosts still provide the file transport and cache.
+
 ## Safety and limits
 
 Registry data, archives, locks, and traces are treated as untrusted input.

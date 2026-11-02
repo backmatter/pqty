@@ -215,15 +215,23 @@ fn scan_file(
             PqtyError::Usage(format!("source file is missing: {}", path.as_str()))
         })?,
     };
-    let text = String::from_utf8(bytes).map_err(|error| {
-        PqtyError::Usage(format!(
-            "source file is not UTF-8: {}: {error}",
-            path.as_str()
-        ))
-    })?;
-    record_source_bytes(context, path, text.as_bytes());
+    record_source_bytes(context, path, &bytes);
+    let text = String::from_utf8_lossy(&bytes);
+    let legacy_bytes = matches!(text, std::borrow::Cow::Owned(_));
 
     for (line_number, command) in scan_commands(&text) {
+        if legacy_bytes
+            && command
+                .required
+                .iter()
+                .chain(&command.options)
+                .any(|value| value.contains('\u{fffd}'))
+        {
+            return Err(PqtyError::Usage(format!(
+                "dependency arguments must be UTF-8: {}:{line_number}",
+                path.as_str()
+            )));
+        }
         handle_command(source, context, path, line_number, &command, queue)?;
     }
 

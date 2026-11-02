@@ -72,38 +72,12 @@ pub fn write_lock(path: &Path, lock: &LockFile) -> Result<(), PqtyError> {
 }
 
 pub(crate) fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), PqtyError> {
-    let parent = usable_parent(path);
-    let temp = unique_sibling(path, "write")?;
-    let result = (|| -> Result<(), PqtyError> {
-        let mut file = fs::OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .open(&temp)
-            .map_err(|source| PqtyError::Io {
-                path: temp.clone(),
-                source,
-            })?;
-        file.write_all(bytes).map_err(|source| PqtyError::Io {
-            path: temp.clone(),
-            source,
-        })?;
-        file.sync_all().map_err(|source| PqtyError::Io {
-            path: temp.clone(),
-            source,
-        })?;
-        fs::rename(&temp, path).map_err(|source| PqtyError::Io {
-            path: path.to_path_buf(),
-            source,
-        })?;
-        if let Ok(directory) = fs::File::open(parent) {
-            let _ = directory.sync_all();
-        }
-        Ok(())
-    })();
-    if result.is_err() {
-        let _ = fs::remove_file(&temp);
-    }
-    result
+    let mut file = crate::temporary_file(path, "write")?;
+    file.write_all(bytes).map_err(|source| PqtyError::Io {
+        path: file.path().to_owned(),
+        source,
+    })?;
+    crate::publish_file(file, path)
 }
 
 pub(crate) fn usable_parent(path: &Path) -> &Path {
@@ -112,6 +86,8 @@ pub(crate) fn usable_parent(path: &Path) -> &Path {
         .unwrap_or_else(|| Path::new("."))
 }
 
+// Persistent quarantined evidence needs a unique name, not a temporary owner.
+// Staging files and directories use crate::temporary's scoped owners instead.
 pub(crate) fn unique_sibling(path: &Path, label: &str) -> Result<PathBuf, PqtyError> {
     let name = path
         .file_name()

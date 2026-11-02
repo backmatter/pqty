@@ -74,6 +74,10 @@ pub struct IndexPackage {
     pub depends: Vec<String>,
     /// `execute addMap` / `execute addMixedMap` registry actions.
     pub font_maps: Vec<String>,
+    /// Typed Map/MixedMap/KanjiMap declarations, including unresolved templates.
+    pub font_map_declarations: Vec<super::font_map::FontMapDeclaration>,
+    /// Engine-neutral `execute AddHyphen` language declarations.
+    pub hyphenation: Vec<super::language::HyphenationDeclaration>,
     /// Runtime files (relative to TEXMF root), used by `materialize`.
     pub runfiles: Vec<String>,
     /// sha512 of the `.tar.xz` container. Present only in the tlnet tlpdb, not
@@ -85,27 +89,48 @@ pub struct IndexPackage {
 
 impl IndexPackage {
     pub(crate) fn belongs_to_package_layer(&self) -> bool {
-        self.category == "Package" && self.provides_package_resource()
+        self.provides_package_resource()
     }
 
     pub(super) fn provides_package_resource(&self) -> bool {
-        matches!(self.category.as_str(), "Package" | "TLCore")
+        matches!(self.category.as_str(), "Package" | "TLCore" | "ConTeXt")
             && self.runfiles.iter().any(|path| {
+                if !is_texmf_runfile(path) {
+                    return false;
+                }
                 let (_, path) = normalize_runfile(path);
-                matches!(
-                    path.split('/').next(),
-                    Some(
-                        "tex"
-                            | "bibtex"
-                            | "fonts"
-                            | "makeindex"
-                            | "dvips"
-                            | "dvipdfmx"
-                            | "metafont"
-                            | "metapost"
-                            | "omega"
-                    )
-                )
+                !matches!(path.split('/').next(), Some("doc" | "source"))
             })
     }
+}
+
+/// Distribution-root helpers and platform binaries are not TEXMF inputs.
+/// Explicit distribution prefixes identify arbitrary TEXMF subdirectories;
+/// bare paths retain the conventional TDS roots supported by custom indexes.
+pub(super) fn is_texmf_runfile(path: &str) -> bool {
+    if let Some(path) = path
+        .strip_prefix("RELOC/")
+        .or_else(|| path.strip_prefix("texmf-dist/"))
+    {
+        return !matches!(path.split('/').next(), Some("tlpkg" | "bin"));
+    }
+    matches!(
+        path.split('/').next(),
+        Some(
+            "tex"
+                | "bibtex"
+                | "fonts"
+                | "makeindex"
+                | "dvips"
+                | "dvipdfmx"
+                | "metafont"
+                | "metapost"
+                | "omega"
+                | "scripts"
+                | "web2c"
+                | "tex4ht"
+                | "xindy"
+                | "asymptote"
+        )
+    )
 }

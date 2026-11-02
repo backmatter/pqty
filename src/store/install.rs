@@ -1,14 +1,11 @@
 use crate::store::container::container_cache_path;
-use crate::store::http::read_file_bounded;
 use crate::store::object::{
-    STORE_PACKAGE_SCHEMA, StoredFile, StoredPackageManifest, ensure_store_object,
-    load_store_manifest, package_digest, provider_manifest_digest, quarantine_store_entry,
-    store_manifest_path, write_store_manifest,
+    STORE_PACKAGE_SCHEMA, StoredFile, StoredPackageManifest, load_store_manifest, package_digest,
+    provider_manifest_digest, quarantine_store_entry, store_manifest_path, store_reader,
+    write_store_manifest,
 };
 use crate::store::transaction::{FileGuard, Installation};
-use crate::store::{
-    ContainerRequest, MaterializeReport, default_cache_dir, fetch_container_runfiles,
-};
+use crate::store::{MaterializeReport, default_cache_dir};
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -16,12 +13,10 @@ use std::io::{self, Read as _, Write as _};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-use sha2::{Digest as _, Sha256};
 
 use crate::{
-    LinkMode, LockFile, LockedFile, MAX_ARCHIVE_ENTRY_BYTES, PqtyError, ResolvedEnvironment,
-    ResolvedPackage, canonical_or_original, progress, usable_parent, validate_materialized_lock,
-    validate_tds_path,
+    LinkMode, LockFile, PqtyError, ResolvedEnvironment, ResolvedPackage, canonical_or_original,
+    progress, usable_parent, validate_materialized_lock,
 };
 
 const MATERIALIZED_MARKER: &str = ".pqty-materialized.json";
@@ -239,9 +234,64 @@ fn recover_locked_provider(
     offline: bool,
     allow_insecure: bool,
 ) -> Result<(), PqtyError> {
-    let required = entry.files.iter().collect::<Vec<_>>();
-    let bytes = locked_provider_bytes(lock, entry, &required, offline, allow_insecure)?;
-    store_locked_provider(store_dir, entry, &bytes, report)
+    let source = locked_byte_source(lock, entry, offline, allow_insecure)?;
+    let required = entry
+        .files
+        .iter()
+        .map(|file| file.tds_path.clone())
+        .collect::<Vec<_>>();
+    let mut files = Vec::new();
+    let mut total = 0_u64;
+    super::visit_provider_files(
+        &source,
+        &entry.source.locator,
+        entry.source.container_checksum.as_deref(),
+        entry.source.container_size,
+        &required,
+        &mut |path, reader| {
+            let object = store_reader(store_dir, reader, None)?;
+            total += object.size;
+            if total > crate::MAX_CONTAINER_EXPANDED_BYTES {
+                return Err(PqtyError::Usage(
+                    "recovered provider exceeds byte limit".into(),
+                ));
+            }
+            if object.created {
+                report.bytes_stored += object.size;
+            }
+            files.push(StoredFile {
+                tds_path: path.strip_prefix("texmf-dist/").unwrap_or(path).to_owned(),
+                digest: format!("sha256:{}", object.digest),
+            });
+            Ok(())
+        },
+    )?;
+    files.sort_by(|left, right| left.tds_path.cmp(&right.tds_path));
+    let paths = files
+        .iter()
+        .map(|file| file.tds_path.as_str())
+        .collect::<BTreeSet<_>>();
+    if paths != required.iter().map(String::as_str).collect() || paths.len() != files.len() {
+        return Err(PqtyError::Usage(format!(
+            "fetched provider {} does not match its locked file index",
+            entry.provider
+        )));
+    }
+    let expected = package_digest(entry)?;
+    if hex::encode(provider_manifest_digest(&files)?) != expected {
+        return Err(PqtyError::Usage(format!(
+            "package checksum mismatch for {}",
+            entry.provider
+        )));
+    }
+    write_store_manifest(
+        store_dir,
+        &expected,
+        &StoredPackageManifest {
+            schema: STORE_PACKAGE_SCHEMA.into(),
+            files,
+        },
+    )
 }
 
 enum StoredProviderState {
@@ -263,23 +313,7 @@ pub(super) fn stored_file_digest(digest: &str) -> Result<&str, PqtyError> {
 }
 
 fn file_digest(path: &Path) -> Result<String, PqtyError> {
-    let mut file = fs::File::open(path).map_err(|source| PqtyError::Io {
-        path: path.to_path_buf(),
-        source,
-    })?;
-    let mut hasher = Sha256::new();
-    let mut buffer = [0; 16384];
-    loop {
-        let count = file.read(&mut buffer).map_err(|source| PqtyError::Io {
-            path: path.to_path_buf(),
-            source,
-        })?;
-        if count == 0 {
-            break;
-        }
-        hasher.update(&buffer[..count]);
-    }
-    Ok(hex::encode(hasher.finalize()))
+    Ok(super::stream::digest_file(path, crate::MAX_ARCHIVE_ENTRY_BYTES)?.0)
 }
 
 fn verify_file_digest(path: &Path, expected: &str) -> Result<(), PqtyError> {
@@ -325,67 +359,12 @@ fn inspect_stored_provider(
     Ok(StoredProviderState::Ready)
 }
 
-fn store_locked_provider(
-    store_dir: &Path,
-    entry: &ResolvedPackage,
-    bytes: &BTreeMap<String, Vec<u8>>,
-    report: &mut MaterializeReport,
-) -> Result<(), PqtyError> {
-    let locked_paths = entry
-        .files
-        .iter()
-        .map(|file| file.tds_path.as_str())
-        .collect::<BTreeSet<_>>();
-    let fetched_paths = bytes.keys().map(String::as_str).collect::<BTreeSet<_>>();
-    if locked_paths != fetched_paths {
-        return Err(PqtyError::Usage(format!(
-            "fetched provider {} does not match its locked file index",
-            entry.provider
-        )));
-    }
-
-    let mut files = Vec::with_capacity(bytes.len());
-    let mut content_digests = Vec::with_capacity(bytes.len());
-    for (path, content) in bytes {
-        let digest = hex::encode(Sha256::digest(content));
-        files.push(StoredFile {
-            tds_path: path.clone(),
-            digest: format!("sha256:{digest}"),
-        });
-        content_digests.push((content, digest));
-    }
-    files.sort_by(|left, right| left.tds_path.cmp(&right.tds_path));
-    let actual = hex::encode(provider_manifest_digest(&files)?);
-    let expected = package_digest(entry)?;
-    if actual != expected {
-        return Err(PqtyError::Usage(format!(
-            "package checksum mismatch for {}\n  expected: {expected}\n  got:      {actual}",
-            entry.provider
-        )));
-    }
-    for (content, digest) in content_digests {
-        let store_path = store_dir.join(&digest[..2]).join(&digest);
-        if ensure_store_object(store_dir, &store_path, content, &digest)? {
-            report.bytes_stored += content.len() as u64;
-        }
-    }
-    write_store_manifest(
-        store_dir,
-        &expected,
-        &StoredPackageManifest {
-            schema: STORE_PACKAGE_SCHEMA.to_string(),
-            files,
-        },
-    )
-}
-
-fn locked_provider_bytes(
+fn locked_byte_source(
     lock: &LockFile,
     entry: &ResolvedPackage,
-    required: &[&LockedFile],
     offline: bool,
     allow_insecure: bool,
-) -> Result<BTreeMap<String, Vec<u8>>, PqtyError> {
+) -> Result<super::PackageByteSource, PqtyError> {
     let registry_id = entry.source.registry.as_deref().ok_or_else(|| {
         PqtyError::Usage(format!(
             "provider {} has no source registry",
@@ -403,47 +382,20 @@ fn locked_provider_bytes(
             ))
         })?;
     if registry.url.starts_with("http://") || registry.url.starts_with("https://") {
-        let runfiles = required
-            .iter()
-            .map(|file| file.tds_path.clone())
-            .collect::<Vec<_>>();
-        let cache_dir = default_cache_dir().join("containers");
-        let files = fetch_container_runfiles(&ContainerRequest {
-            base_url: registry.url.trim_end_matches('/'),
-            cache_dir: &cache_dir,
-            provider: &entry.source.locator,
-            expected_sha512: entry.source.container_checksum.as_deref(),
-            expected_size: entry.source.container_size,
+        return Ok(super::PackageByteSource::tlnet_with_transport(
+            registry.url.trim_end_matches('/').to_owned(),
+            default_cache_dir().join("containers"),
             offline,
             allow_insecure,
-            runfiles: &runfiles,
-        })?;
-        let mut result = BTreeMap::new();
-        for (placement, bytes) in files {
-            let tds_path = placement
-                .strip_prefix("texmf-dist/")
-                .unwrap_or(&placement)
-                .to_string();
-            result.insert(tds_path, bytes);
-        }
-        return Ok(result);
+        ));
     }
-
     let root = registry.url.strip_prefix("file://").ok_or_else(|| {
         PqtyError::Usage(format!(
             "unsupported registry URL for {}: {}",
             entry.provider, registry.url
         ))
     })?;
-    let root = Path::new(root);
-    let mut result = BTreeMap::new();
-    for file in required {
-        validate_tds_path(&file.tds_path, "locked TDS path")?;
-        let installed_path = root.join("texmf-dist").join(&file.tds_path);
-        let bytes = read_file_bounded(&installed_path, MAX_ARCHIVE_ENTRY_BYTES)?;
-        result.insert(file.tds_path.clone(), bytes);
-    }
-    Ok(result)
+    Ok(super::PackageByteSource::local_texlive(Path::new(root)))
 }
 
 /// Publish a lock's standard TDS paths into a complete TEXMF tree. The tree is

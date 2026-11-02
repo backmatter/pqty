@@ -38,8 +38,8 @@ fn hydration_adds_static_runtime_providers_and_skips_engine_components() {
         "name engine-core\n",
         "category TLCore\n",
         "revision 1\n",
-        "runfiles size=1\n",
-        " texmf-dist/tex/latex/engine-core/engine-core.sty\n",
+        "binfiles arch=test size=1\n",
+        " bin/test/engine\n",
     );
     let index = TlpdbIndex::parse(sample, &root.join("tlpkg/texlive.tlpdb"));
     let mut source = MemorySourceTree::default();
@@ -106,3 +106,60 @@ use crate::{
     MemorySourceTree, PackageByteSource, TlpdbIndex, VirtualPath, hydrate_lock, resolve,
     scan_source,
 };
+
+#[test]
+fn cached_requests_are_resolved_again_when_new_files_disambiguate_them() {
+    use crate::PackageRegistry;
+    let root = temporary_test_root("late-runtime-discovery");
+    let metadata = concat!(
+        "name alpha\ncategory Package\nrevision 1\nrunfiles size=1\n RELOC/tex/latex/alpha/alpha.sty\n\n",
+        "name beta\ncategory Package\nrevision 1\nrunfiles size=1\n RELOC/tex/latex/beta/beta.sty\n RELOC/tex/latex/beta/shared.def\n\n",
+        "name decoy\ncategory Package\nrevision 1\nrunfiles size=1\n RELOC/tex/latex/decoy/shared.def\n\n",
+        "name gamma\ncategory Package\nrevision 1\nrunfiles size=1\n RELOC/tex/latex/gamma/gamma.sty\n",
+    );
+    let index = TlpdbIndex::parse(metadata, &root.join("tlpkg/texlive.tlpdb"));
+    assert_eq!(index.providers_of_file("shared.def").len(), 2);
+    for provider in ["alpha", "beta", "gamma"] {
+        for file in &index.package(provider).unwrap().runfiles {
+            let path = root.join(crate::normalize_runfile(file).0);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            let bytes = if provider == "alpha" {
+                br"\IfFileExists{shared.def}{}{}\RequirePackage{beta}".as_slice()
+            } else if file.ends_with("shared.def") {
+                br"\RequirePackage{gamma}".as_slice()
+            } else {
+                b"% package data\n".as_slice()
+            };
+            fs::write(path, bytes).unwrap();
+        }
+    }
+    let mut tree = MemorySourceTree::default();
+    tree.insert(
+        VirtualPath::new("main.tex").unwrap(),
+        br"\usepackage{alpha}",
+    );
+    let mut lock = scan_source(&tree, VirtualPath::new("main.tex").unwrap()).unwrap();
+    resolve(&mut lock, &index);
+    hydrate_lock(
+        &mut lock,
+        &index,
+        &PackageByteSource::local_texlive(&root),
+        &root.join("store"),
+    )
+    .unwrap();
+    assert_eq!(
+        lock.closure
+            .iter()
+            .map(|entry| entry.provider.as_str())
+            .collect::<Vec<_>>(),
+        ["alpha", "beta", "gamma"]
+    );
+    let gamma = lock
+        .closure
+        .iter()
+        .find(|entry| entry.provider == "gamma")
+        .unwrap();
+    assert_eq!(gamma.requested_by, ["beta"]);
+    super::make_test_tree_writable(&root);
+    fs::remove_dir_all(root).unwrap();
+}

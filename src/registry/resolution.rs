@@ -128,15 +128,17 @@ pub fn resolve(lock: &mut LockFile, index: &impl PackageRegistry) {
         }
     }
 
-    // Expand tlpdb `depend` edges into the transitive closure.
+    super::inputs::resolve_inputs(lock, index, &registry_id, &mut closure, &mut queue);
+
+    // Expand tlpdb data dependencies, including TLCore and ConTeXt runfiles.
     while let Some(provider) = queue.pop_front() {
         let deps = closure
             .get(&provider)
             .map(|entry| entry.dependencies.clone())
             .unwrap_or_default();
         for dep in deps {
-            // Only expand deps that are real packages (skip arch-/collection-only
-            // pseudo-deps); the edge is still recorded in `dependencies`.
+            // Binary-only, collection, and installation providers stay outside
+            // the package-data closure.
             if index
                 .package(&dep)
                 .is_none_or(|package| !package.belongs_to_package_layer())

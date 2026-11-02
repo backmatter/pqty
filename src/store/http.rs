@@ -13,15 +13,20 @@ const HTTP_USER_AGENT: &str = concat!(
     "; +https://github.com/backmatter/pqty)"
 );
 
-fn http_agent() -> ureq::Agent {
-    ureq::Agent::config_builder()
-        .user_agent(HTTP_USER_AGENT)
-        .max_redirects(0)
-        .timeout_global(Some(HTTP_REQUEST_TIMEOUT))
-        .timeout_connect(Some(HTTP_CONNECT_TIMEOUT))
-        .timeout_recv_body(Some(HTTP_READ_TIMEOUT))
-        .build()
-        .into()
+fn http_agent() -> &'static ureq::Agent {
+    // The Agent owns bounded connection pooling. URL/redirect policy remains
+    // request-local; no credentials or cookie storage are configured here.
+    static AGENT: std::sync::OnceLock<ureq::Agent> = std::sync::OnceLock::new();
+    AGENT.get_or_init(|| {
+        ureq::Agent::config_builder()
+            .user_agent(HTTP_USER_AGENT)
+            .max_redirects(0)
+            .timeout_global(Some(HTTP_REQUEST_TIMEOUT))
+            .timeout_connect(Some(HTTP_CONNECT_TIMEOUT))
+            .timeout_recv_body(Some(HTTP_READ_TIMEOUT))
+            .build()
+            .into()
+    })
 }
 
 const MAX_HTTP_REDIRECTS: usize = 5;
@@ -205,4 +210,71 @@ pub(super) fn read_file_bounded(path: &Path, limit: u64) -> Result<Vec<u8>, Pqty
         source,
     })?;
     read_bounded(file, limit, &path.display().to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{
+        io::{BufRead, BufReader, Write},
+        net::TcpListener,
+    };
+
+    fn read_request(stream: &mut BufReader<std::net::TcpStream>) -> bool {
+        let mut line = String::new();
+        loop {
+            line.clear();
+            if stream.read_line(&mut line).unwrap() == 0 {
+                return false;
+            }
+            if line == "\r\n" {
+                return true;
+            }
+        }
+    }
+
+    #[test]
+    fn separate_fetches_reuse_a_connection_after_the_body_is_consumed() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/package", listener.local_addr().unwrap());
+        let server = std::thread::spawn(move || {
+            let (socket, _) = listener.accept().unwrap();
+            socket
+                .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+                .unwrap();
+            let mut stream = BufReader::new(socket);
+            let mut connections = 1;
+            for _ in 0..2 {
+                if !read_request(&mut stream) {
+                    let (socket, _) = listener.accept().unwrap();
+                    socket
+                        .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+                        .unwrap();
+                    stream = BufReader::new(socket);
+                    connections += 1;
+                    assert!(read_request(&mut stream));
+                }
+                stream
+                    .get_mut()
+                    .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+                    .unwrap();
+            }
+            connections
+        });
+        for _ in 0..2 {
+            let HttpGetOutcome::Response(response) =
+                get_with_safe_redirects(&url, true, None, None).unwrap()
+            else {
+                panic!("expected response")
+            };
+            let mut body = Vec::new();
+            response
+                .into_body()
+                .into_reader()
+                .read_to_end(&mut body)
+                .unwrap();
+            assert_eq!(body, b"ok");
+        }
+        assert_eq!(server.join().unwrap(), 1);
+    }
 }

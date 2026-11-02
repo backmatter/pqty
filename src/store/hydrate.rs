@@ -11,8 +11,7 @@ use std::path::Path;
 
 use crate::{
     LockFile, LockStage, MAX_CLOSURE_EXPANDED_BYTES, PackageRegistry, ParsedCommand, PqtyError,
-    ResolvedPackage, canonical_or_original, resolved_from, scan_commands, split_names,
-    validate_materialized_lock,
+    canonical_or_original, resolved_from, scan_commands, split_names, validate_materialized_lock,
 };
 
 /// Resolve package bytes into the shared store and fill all integrity/file
@@ -41,6 +40,7 @@ pub fn hydrate_lock(
     let _store_guard = super::transaction::FileGuard::store(&store_dir)?;
     let mut report = MaterializeReport::new(store_dir.clone(), None);
     let mut expanded_bytes = 0_u64;
+    let mut discovery = RuntimeFileIndex::default();
 
     loop {
         validate_closure_resource_limits(lock, index)?;
@@ -74,11 +74,26 @@ pub fn hydrate_lock(
                     "provider closure exceeds the {MAX_CLOSURE_EXPANDED_BYTES}-byte expanded-content limit"
                 )));
             }
+            for request in &entry.runtime_requests {
+                if !materialized.files.iter().any(|file| {
+                    file.tds_path == *request
+                        || (!request.contains('/')
+                            && Path::new(&file.tds_path)
+                                .file_name()
+                                .and_then(|name| name.to_str())
+                                == Some(request))
+                }) {
+                    return Err(PqtyError::Usage(format!(
+                        "provider {} is missing requested runtime file {request}",
+                        entry.provider
+                    )));
+                }
+            }
             entry.integrity = Some(materialized.integrity);
             entry.store_key = Some(materialized.store_key);
             entry.files = materialized.files;
         }
-        let discovered = discover_runtime_providers(lock, index, &store_dir)?;
+        let discovered = discovery.discover(lock, index, &store_dir)?;
         if add_runtime_providers(lock, index, discovered) == 0 {
             break;
         }
@@ -97,67 +112,107 @@ pub fn hydrate_lock(
     Ok(report)
 }
 
-fn discover_runtime_providers(
-    lock: &LockFile,
-    index: &impl PackageRegistry,
-    store_dir: &Path,
-) -> Result<BTreeMap<String, RuntimeProviderDiscovery>, PqtyError> {
-    let files = build_runtime_file_index(lock, store_dir)?;
-    let queue = initial_runtime_queue(lock, &files);
-    discover_from_runtime_queue(index, store_dir, &files, queue)
-}
-
-struct RuntimeFileIndex<'a> {
-    closure: BTreeMap<&'a str, &'a ResolvedPackage>,
+// A hydration operation only grows its immutable provider set. Keep verified
+// manifest indexes and compact parsed requests for that operation, never source
+// text, a process-wide cache, or a time-based cache policy.
+#[derive(Default)]
+struct RuntimeFileIndex {
+    closure: BTreeMap<String, String>,
     by_name: BTreeMap<String, Vec<(String, String)>>,
-    by_path: BTreeMap<String, (&'a ResolvedPackage, String)>,
+    by_path: BTreeMap<String, (String, String)>,
+    requests: BTreeMap<String, Vec<Vec<String>>>,
 }
 
-fn build_runtime_file_index<'a>(
-    lock: &'a LockFile,
-    store_dir: &Path,
-) -> Result<RuntimeFileIndex<'a>, PqtyError> {
-    let closure = lock
-        .closure
-        .iter()
-        .map(|entry| (entry.provider.as_str(), entry))
-        .collect::<BTreeMap<_, _>>();
-    let mut by_name: BTreeMap<String, Vec<(String, String)>> = BTreeMap::new();
-    let mut by_path: BTreeMap<String, (&ResolvedPackage, String)> = BTreeMap::new();
-    for entry in &lock.closure {
-        let manifest = load_store_manifest(store_dir, entry)?;
-        let digests = manifest
-            .files
-            .into_iter()
-            .map(|file| (file.tds_path, file.digest))
-            .collect::<BTreeMap<_, _>>();
-        for file in &entry.files {
-            if let Some(name) = Path::new(&file.tds_path)
-                .file_name()
-                .and_then(|name| name.to_str())
-            {
-                by_name
-                    .entry(name.to_string())
-                    .or_default()
-                    .push((entry.provider.clone(), file.tds_path.clone()));
-            }
-            let digest = digests.get(&file.tds_path).ok_or_else(|| {
-                PqtyError::Usage(format!(
-                    "package store manifest for {} omits {}",
-                    entry.provider, file.tds_path
-                ))
-            })?;
-            by_path.insert(file.tds_path.clone(), (entry, digest.clone()));
-        }
+impl RuntimeFileIndex {
+    fn discover(
+        &mut self,
+        lock: &LockFile,
+        index: &impl PackageRegistry,
+        store: &Path,
+    ) -> Result<BTreeMap<String, RuntimeProviderDiscovery>, PqtyError> {
+        self.extend(lock, store)?;
+        let queue = initial_runtime_queue(lock, self);
+        discover_from_runtime_queue(index, store, self, queue)
     }
-    Ok(RuntimeFileIndex {
-        closure,
-        by_name,
-        by_path,
-    })
+
+    fn extend(&mut self, lock: &LockFile, store: &Path) -> Result<(), PqtyError> {
+        for entry in &lock.closure {
+            if let Some(identity) = self.closure.get(&entry.provider) {
+                if entry.integrity.as_ref() != Some(identity) {
+                    return Err(PqtyError::Usage(
+                        "provider identity changed within hydration".into(),
+                    ));
+                }
+                continue;
+            }
+            let manifest = load_store_manifest(store, entry)?;
+            for file in manifest.files {
+                if let Some(name) = Path::new(&file.tds_path)
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                {
+                    self.by_name
+                        .entry(name.to_owned())
+                        .or_default()
+                        .push((entry.provider.clone(), file.tds_path.clone()));
+                }
+                self.by_path
+                    .insert(file.tds_path, (entry.provider.clone(), file.digest));
+            }
+            self.closure.insert(
+                entry.provider.clone(),
+                entry
+                    .integrity
+                    .clone()
+                    .ok_or_else(|| PqtyError::Usage("provider is not hydrated".into()))?,
+            );
+        }
+        Ok(())
+    }
+
+    fn parsed_requests(&mut self, digest: &str, store: &Path) -> Result<&[Vec<String>], PqtyError> {
+        if !self.requests.contains_key(digest) {
+            let digest_hex = stored_file_digest(digest)?;
+            let path = store.join(&digest_hex[..2]).join(digest_hex);
+            let bytes = super::http::read_file_bounded(&path, crate::MAX_ARCHIVE_ENTRY_BYTES)?;
+            // Cache only normalized, deduplicated request candidates; source
+            // bytes and parser structures are released before processing more files.
+            let requests = parse_runtime_requests(&String::from_utf8_lossy(&bytes));
+            self.requests.insert(digest.to_owned(), requests);
+        }
+        Ok(&self.requests[digest])
+    }
 }
 
-fn initial_runtime_queue(lock: &LockFile, files: &RuntimeFileIndex<'_>) -> VecDeque<String> {
+fn parse_runtime_requests(text: &str) -> Vec<Vec<String>> {
+    scan_commands(text)
+        .into_iter()
+        .flat_map(|(_, command)| {
+            runtime_file_requests(&command)
+                .into_iter()
+                .filter_map(|(request, extensions)| {
+                    let name = Path::new(request.trim()).file_name()?.to_str()?;
+                    if name.contains(['\\', '#', '{', '}']) {
+                        return None;
+                    }
+                    let mut candidates = vec![name.to_owned()];
+                    if Path::new(name).extension().is_none() {
+                        candidates.extend(
+                            extensions
+                                .iter()
+                                .map(|extension| format!("{name}.{extension}")),
+                        );
+                    }
+                    Some(candidates)
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
+fn initial_runtime_queue(lock: &LockFile, files: &RuntimeFileIndex) -> VecDeque<String> {
     let mut queue = VecDeque::new();
     for entry in &lock.closure {
         if !entry.runtime_requests.is_empty() {
@@ -166,7 +221,7 @@ fn initial_runtime_queue(lock: &LockFile, files: &RuntimeFileIndex<'_>) -> VecDe
                     if files
                         .by_path
                         .get(request)
-                        .is_some_and(|(owner, _)| owner.provider == entry.provider)
+                        .is_some_and(|(owner, _)| owner == &entry.provider)
                     {
                         queue.push_back(request.clone());
                     }
@@ -179,7 +234,8 @@ fn initial_runtime_queue(lock: &LockFile, files: &RuntimeFileIndex<'_>) -> VecDe
                     );
                 }
             }
-        } else if entry.direct {
+        }
+        if entry.direct {
             for request in &entry.satisfies {
                 for extension in ["sty", "cls", "bst"] {
                     let name = format!("{request}.{extension}");
@@ -193,7 +249,7 @@ fn initial_runtime_queue(lock: &LockFile, files: &RuntimeFileIndex<'_>) -> VecDe
                     }
                 }
             }
-        } else {
+        } else if entry.runtime_requests.is_empty() {
             queue.extend(
                 entry
                     .files
@@ -209,7 +265,7 @@ fn initial_runtime_queue(lock: &LockFile, files: &RuntimeFileIndex<'_>) -> VecDe
 fn discover_from_runtime_queue(
     index: &impl PackageRegistry,
     store_dir: &Path,
-    files: &RuntimeFileIndex<'_>,
+    files: &mut RuntimeFileIndex,
     mut queue: VecDeque<String>,
 ) -> Result<BTreeMap<String, RuntimeProviderDiscovery>, PqtyError> {
     let mut visited = BTreeSet::new();
@@ -218,59 +274,35 @@ fn discover_from_runtime_queue(
         if !visited.insert(path.clone()) {
             continue;
         }
-        let Some((owner, digest)) = files.by_path.get(&path) else {
+        let Some((owner, digest)) = files.by_path.get(&path).cloned() else {
             continue;
         };
         if !is_scannable_runtime_path(&path) {
             continue;
         }
-        let digest = stored_file_digest(digest)?;
-        let bytes = fs::read(store_dir.join(&digest[..2]).join(digest)).map_err(|source| {
-            PqtyError::Io {
-                path: store_dir.join(&digest[..2]).join(digest),
-                source,
+        // Re-evaluate requests against the current file index on every round;
+        // only reading and parsing immutable bytes is cached.
+        files.parsed_requests(&digest, store_dir)?;
+        for candidates in &files.requests[&digest] {
+            let mut found_locked = false;
+            for candidate in candidates {
+                if let Some(paths) = files.by_name.get(candidate) {
+                    queue.extend(paths.iter().map(|(_, path)| path.clone()));
+                    found_locked = true;
+                }
             }
-        })?;
-        let text = String::from_utf8_lossy(&bytes);
-        for (_, command) in scan_commands(&text) {
-            for (request, extensions) in runtime_file_requests(&command) {
-                let mut candidates = Vec::new();
-                let request_path = Path::new(request.trim());
-                let Some(name) = request_path.file_name().and_then(|name| name.to_str()) else {
-                    continue;
-                };
-                if name.contains(['\\', '#', '{', '}']) {
-                    continue;
-                }
-                candidates.push(name.to_string());
-                if Path::new(name).extension().is_none() {
-                    candidates.extend(
-                        extensions
-                            .iter()
-                            .map(|extension| format!("{name}.{extension}")),
-                    );
-                }
-
-                let mut found_locked = false;
-                for candidate in &candidates {
-                    if let Some(paths) = files.by_name.get(candidate) {
-                        queue.extend(paths.iter().map(|(_, path)| path.clone()));
-                        found_locked = true;
-                    }
-                }
-                if found_locked {
-                    continue;
-                }
-                if let Some((runtime_request, provider)) = candidates.iter().find_map(|candidate| {
-                    index
-                        .provider_of_file(candidate)
-                        .map(|provider| (candidate, provider))
-                }) && !files.closure.contains_key(provider)
-                {
-                    let discovery = discovered.entry(provider.to_string()).or_default();
-                    discovery.parents.insert(owner.provider.clone());
-                    discovery.files.insert(runtime_request.clone());
-                }
+            if found_locked {
+                continue;
+            }
+            if let Some((runtime_request, provider)) = candidates.iter().find_map(|candidate| {
+                index
+                    .provider_of_file(candidate)
+                    .map(|provider| (candidate, provider))
+            }) && !files.closure.contains_key(provider)
+            {
+                let discovery = discovered.entry(provider.to_string()).or_default();
+                discovery.parents.insert(owner.clone());
+                discovery.files.insert(runtime_request.clone());
             }
         }
     }
@@ -285,6 +317,16 @@ struct RuntimeProviderDiscovery {
 
 fn runtime_file_requests(command: &ParsedCommand) -> Vec<(String, &'static [&'static str])> {
     match command.name.as_str() {
+        "input" => command
+            .required
+            .iter()
+            .flat_map(|value| split_names(value))
+            .filter(|name| {
+                !name.contains(['/', '\\', '#', '{', '}'])
+                    && crate::validate_tds_path(name, "literal runtime input").is_ok()
+            })
+            .map(|name| (name, &["tex"][..]))
+            .collect(),
         "usepackage" | "RequirePackage" => command
             .required
             .iter()
@@ -435,4 +477,40 @@ pub(crate) fn add_trace_providers(
 
     lock.closure = closure.into_values().collect();
     lock.stage = LockStage::Resolved;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn request_cache_reuses_content_only_inside_its_operation() {
+        let store = tempfile::tempdir().unwrap();
+        let bytes = br"\RequirePackage{alpha,alpha}\input plain";
+        let digest = format!(
+            "sha256:{}",
+            super::super::object::store_reader(store.path(), &mut &bytes[..], None)
+                .unwrap()
+                .digest
+        );
+        let mut cache = RuntimeFileIndex::default();
+        let requests = cache
+            .parsed_requests(&digest, store.path())
+            .unwrap()
+            .to_vec();
+        assert_eq!(requests.len(), 2);
+        let hex = stored_file_digest(&digest).unwrap();
+        let path = store.path().join(&hex[..2]).join(hex);
+        // Hits need no second read. Fresh operations still consult the store.
+        crate::tests::make_test_tree_writable(store.path());
+        fs::remove_file(path).unwrap();
+        assert_eq!(
+            cache.parsed_requests(&digest, store.path()).unwrap(),
+            requests
+        );
+        assert!(
+            RuntimeFileIndex::default()
+                .parsed_requests(&digest, store.path())
+                .is_err()
+        );
+    }
 }

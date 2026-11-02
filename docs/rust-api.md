@@ -105,6 +105,30 @@ The normative fields and invariants are described by the
 - [environment](environment-schema.md)
 - [trace and trace report](trace-schema.md)
 - [convergence report](convergence.md)
+- [language declarations and verified file manifests](lazy-inputs.md)
+
+### Explicit languages and lazy files
+
+`TlpdbIndex::resolve_languages` resolves canonical `AddHyphen` names and aliases
+to `LanguageManifest`. `require_languages` persists their exact files and
+providers as existing v1 consumer requirements, transactionally on error.
+Hydrate the result before exact installation. `LanguageManifest::validate`
+checks all metadata against the selected registry index.
+
+`export_file_manifest` verifies an exact store offline and returns `FileManifest`
+with per-file content hashes and sizes. `FileManifest::validate` binds that
+metadata to an exact lock without exposing the private store layout. A caller
+must also verify received bytes against their declared hashes and sizes.
+
+`copy_verified_file` streams one exact locked TDS path to a caller-owned writer
+after verification. The caller commits output only after success. `export_file`
+provides atomic file publication. Both work offline without an installed TEXMF
+tree or access to unrelated objects.
+
+`TlpdbIndex::font_map_manifest` projects typed Map/MixedMap/KanjiMap declarations
+and unresolved profile templates for an exact lock. `FontMapManifest::validate`
+binds that projection to the lock and its registry; hosts own profile selection
+and map generation.
 
 ### Runtime convergence
 

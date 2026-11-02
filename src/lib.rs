@@ -89,6 +89,9 @@ const MAX_TLPDB_COMPRESSED_BYTES: u64 = 128 * 1024 * 1024;
 const MAX_TLPDB_EXPANDED_BYTES: u64 = 256 * 1024 * 1024;
 static OPERATION_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
+mod temporary;
+pub(crate) use temporary::{publish_file, temporary_directory, temporary_file};
+
 mod error;
 pub use error::PqtyError;
 
@@ -131,13 +134,20 @@ pub(crate) use source::{
 };
 
 mod registry;
-pub use registry::{IndexPackage, PackageRegistry, TlpdbIndex, require_runtime, resolve};
-pub(crate) use registry::{locate_tlpdb, normalized_consumer_requirements, resolved_from};
+pub use registry::{
+    FONT_MAPS_SCHEMA, FontMapDeclaration, FontMapKind, FontMapManifest, HyphenationDeclaration,
+    IndexPackage, LANGUAGES_SCHEMA, LanguageAttribute, LanguageManifest, PackageRegistry,
+    ResolvedFontMap, ResolvedLanguage, TlpdbIndex, require_languages, require_runtime, resolve,
+};
+pub(crate) use registry::{
+    has_registry_inputs, locate_tlpdb, normalized_consumer_requirements, resolved_from,
+};
 
 mod store;
 pub use store::{
-    BUNDLE_SCHEMA, MaterializeReport, PackageByteSource, export_bundle, hydrate_lock,
-    import_bundle, install_locked, materialize_from_store,
+    BUNDLE_SCHEMA, FILE_MANIFEST_SCHEMA, FileManifest, ManifestFile, MaterializeReport,
+    PackageByteSource, copy_verified_file, export_bundle, export_file, export_file_manifest,
+    hydrate_lock, import_bundle, install_locked, materialize_from_store,
 };
 #[cfg(test)]
 use store::{BoundedWriter, take_container_runfile};

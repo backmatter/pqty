@@ -1,6 +1,6 @@
 use crate::store::container::container_cache_path;
 use crate::store::http::read_file_bounded;
-use crate::store::{MaterializeReport, PackageByteSource, provider_bytes};
+use crate::store::{MaterializeReport, PackageByteSource, visit_provider_files};
 
 use std::collections::BTreeSet;
 use std::fs;
@@ -15,7 +15,7 @@ use sha2::{Digest as _, Sha256};
 use crate::{
     LockFile, LockedFile, MAX_CLOSURE_EXPANDED_BYTES, MAX_CLOSURE_RUNFILES,
     MAX_CONTAINER_EXPANDED_BYTES, MAX_PROVIDER_RUNFILES, PackageRegistry, PqtyError,
-    ResolvedPackage, progress, resource_kind, unique_sibling,
+    ResolvedPackage, progress, resource_kind, temporary_file, unique_sibling,
 };
 
 /// Fetch and verify one provider's runfiles into the content-addressable store.
@@ -77,47 +77,42 @@ pub(super) fn materialize_provider(
         .package(provider)
         .map(|meta| meta.runfiles.clone())
         .unwrap_or_default();
-    let files = provider_bytes(
+    let mut locked_files = Vec::new();
+    let mut stored_files = Vec::new();
+    let mut expanded_bytes = 0_u64;
+    visit_provider_files(
         source,
         provider,
         container_checksum,
         container_size,
         &runfiles,
+        &mut |relative, reader| {
+            let object = store_reader(store_dir, reader, None)?;
+            expanded_bytes += object.size;
+            if expanded_bytes > MAX_CONTAINER_EXPANDED_BYTES {
+                return Err(PqtyError::Usage(format!(
+                    "provider {provider} exceeds the {MAX_CONTAINER_EXPANDED_BYTES}-byte expanded-content limit"
+                )));
+            }
+            if object.created {
+                report.bytes_stored += object.size;
+            }
+            let tds_path = relative
+                .strip_prefix("texmf-dist/")
+                .unwrap_or(relative)
+                .to_owned();
+            locked_files.push(LockedFile {
+                kind: resource_kind(&tds_path),
+                tds_path: tds_path.clone(),
+            });
+            stored_files.push(StoredFile {
+                tds_path,
+                digest: format!("sha256:{}", object.digest),
+            });
+            report.files += 1;
+            Ok(())
+        },
     )?;
-    let expanded_bytes = files.iter().try_fold(0_u64, |total, (_, bytes)| {
-        total
-            .checked_add(bytes.len() as u64)
-            .ok_or_else(|| PqtyError::Usage("provider byte count overflow".to_string()))
-    })?;
-    if expanded_bytes > MAX_CONTAINER_EXPANDED_BYTES {
-        return Err(PqtyError::Usage(format!(
-            "provider {provider} exceeds the {MAX_CONTAINER_EXPANDED_BYTES}-byte expanded-content limit"
-        )));
-    }
-
-    let mut locked_files = Vec::new();
-    let mut stored_files = Vec::new();
-    for (relative, bytes) in &files {
-        let hex_digest = hex::encode(Sha256::digest(bytes));
-        let store_path = store_dir.join(&hex_digest[..2]).join(&hex_digest);
-        if ensure_store_object(store_dir, &store_path, bytes, &hex_digest)? {
-            report.bytes_stored += bytes.len() as u64;
-        }
-        let tds_path = relative
-            .strip_prefix("texmf-dist/")
-            .unwrap_or(relative)
-            .to_string();
-        locked_files.push(LockedFile {
-            kind: resource_kind(&tds_path),
-            tds_path: tds_path.clone(),
-        });
-        stored_files.push(StoredFile {
-            tds_path,
-            digest: format!("sha256:{hex_digest}"),
-        });
-        report.files += 1;
-    }
-
     locked_files.sort_by(|left, right| left.tds_path.cmp(&right.tds_path));
     stored_files.sort_by(|left, right| left.tds_path.cmp(&right.tds_path));
     // Provider integrity covers the sorted path/file-hash manifest.
@@ -242,36 +237,20 @@ pub(super) fn write_store_manifest(
     })?;
     let mut bytes = serde_json::to_vec(manifest)?;
     bytes.push(b'\n');
-    let temp = unique_sibling(&path, "manifest")?;
-    let result = (|| -> Result<(), PqtyError> {
-        let mut file = fs::OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .open(&temp)
-            .map_err(|source| PqtyError::Io {
-                path: temp.clone(),
-                source,
-            })?;
-        file.write_all(&bytes).map_err(|source| PqtyError::Io {
-            path: temp.clone(),
-            source,
-        })?;
-        file.sync_all().map_err(|source| PqtyError::Io {
-            path: temp.clone(),
-            source,
-        })?;
-        let won = publish_if_absent(&temp, &path)?;
-        if won {
-            make_read_only(&path)?;
-            Ok(())
-        } else {
-            verify_manifest_winner(&path, expected)
-        }
-    })();
-    if result.is_err() {
-        let _ = fs::remove_file(&temp);
+    let mut file = temporary_file(&path, "manifest")?;
+    file.write_all(&bytes).map_err(|source| PqtyError::Io {
+        path: file.path().to_owned(),
+        source,
+    })?;
+    file.as_file().sync_all().map_err(|source| PqtyError::Io {
+        path: file.path().to_owned(),
+        source,
+    })?;
+    if publish_if_absent(file, &path)? {
+        make_read_only(&path)
+    } else {
+        verify_manifest_winner(&path, expected)
     }
-    result
 }
 
 fn verify_manifest_winner(path: &Path, expected: [u8; 32]) -> Result<(), PqtyError> {
@@ -285,32 +264,29 @@ fn verify_manifest_winner(path: &Path, expected: [u8; 32]) -> Result<(), PqtyErr
     make_read_only(path)
 }
 
-fn publish_if_absent(temp: &Path, destination: &Path) -> Result<bool, PqtyError> {
-    match fs::hard_link(temp, destination) {
-        Ok(()) => {
-            fs::remove_file(temp).map_err(|source| PqtyError::Io {
-                path: temp.to_path_buf(),
+fn publish_if_absent(temp: tempfile::NamedTempFile, destination: &Path) -> Result<bool, PqtyError> {
+    let created = match fs::hard_link(temp.path(), destination) {
+        Ok(()) => true,
+        Err(source) if source.kind() == io::ErrorKind::AlreadyExists => false,
+        Err(source) => {
+            return Err(PqtyError::Io {
+                path: destination.to_owned(),
                 source,
-            })?;
-            if let Some(parent) = destination.parent()
-                && let Ok(directory) = fs::File::open(parent)
-            {
-                let _ = directory.sync_all();
-            }
-            Ok(true)
+            });
         }
-        Err(source) if source.kind() == io::ErrorKind::AlreadyExists => {
-            fs::remove_file(temp).map_err(|source| PqtyError::Io {
-                path: temp.to_path_buf(),
-                source,
-            })?;
-            Ok(false)
-        }
-        Err(source) => Err(PqtyError::Io {
-            path: destination.to_path_buf(),
-            source,
-        }),
+    };
+    let path = temp.path().to_owned();
+    // Remove the temporary link before making the destination read-only;
+    // Windows otherwise also makes the temporary link difficult to delete.
+    temp.close()
+        .map_err(|source| PqtyError::Io { path, source })?;
+    if created
+        && let Some(parent) = destination.parent()
+        && let Ok(directory) = fs::File::open(parent)
+    {
+        let _ = directory.sync_all();
     }
+    Ok(created)
 }
 
 fn make_read_only(path: &Path) -> Result<(), PqtyError> {
@@ -413,86 +389,89 @@ pub(super) fn load_store_manifest(
     Ok(manifest)
 }
 
-/// Ensure a content-addressed store object exists and actually matches its key.
-/// New objects are written to a sibling temporary file and atomically promoted.
-/// Returns whether new bytes were stored.
-pub(super) fn ensure_store_object(
+/// Identity and publication result of one streamed immutable object.
+pub(super) struct StoredObject {
+    pub(super) digest: String,
+    pub(super) size: u64,
+    pub(super) created: bool,
+}
+
+/// Publish immutable, content-addressed bytes using standard-library-managed buffering.
+/// Provider manifests are published separately after complete validation.
+pub(super) fn store_reader(
     store_dir: &Path,
-    store_path: &Path,
-    bytes: &[u8],
-    expected_hex: &str,
-) -> Result<bool, PqtyError> {
-    let input_digest = hex::encode(Sha256::digest(bytes));
-    if input_digest != expected_hex {
-        return Err(PqtyError::Usage(format!(
-            "refusing to publish store object with mismatched key\n  expected: {expected_hex}\n  got:      {input_digest}"
-        )));
+    reader: &mut dyn std::io::Read,
+    expected: Option<&str>,
+) -> Result<StoredObject, PqtyError> {
+    fs::create_dir_all(store_dir).map_err(|source| PqtyError::Io {
+        path: store_dir.to_owned(),
+        source,
+    })?;
+    let mut file = temporary_file(&store_dir.join("incoming"), "object")?;
+    let (digest, size) = super::stream::copy_hashed(
+        reader,
+        &mut file,
+        crate::MAX_ARCHIVE_ENTRY_BYTES,
+        &store_dir.join("incoming"),
+    )?;
+    if expected.is_some_and(|expected| expected != digest) {
+        return Err(PqtyError::Usage(
+            "refusing to publish store object with mismatched key".into(),
+        ));
     }
-    if store_path.exists() {
-        let existing = fs::read(store_path).map_err(|source| PqtyError::Io {
-            path: store_path.to_path_buf(),
-            source,
-        })?;
-        let got = hex::encode(Sha256::digest(&existing));
-        if got == expected_hex {
-            make_read_only(store_path)?;
-            return Ok(false);
+    let path = store_dir.join(&digest[..2]).join(&digest);
+    if path.exists() {
+        if super::stream::digest_file(&path, crate::MAX_ARCHIVE_ENTRY_BYTES)?.0 == digest {
+            make_read_only(&path)?;
+            return Ok(StoredObject {
+                digest,
+                size,
+                created: false,
+            });
         }
-        let evidence = quarantine_store_entry(store_dir, store_path, "object")?;
+        let evidence = quarantine_store_entry(store_dir, &path, "object")?;
         eprintln!(
             "pqty: quarantined corrupt store object as {}",
             evidence.display()
         );
     }
-
-    let parent = store_path
-        .parent()
-        .ok_or_else(|| PqtyError::Usage("store object has no parent directory".to_string()))?;
+    let parent = path.parent().expect("object path has parent");
     fs::create_dir_all(parent).map_err(|source| PqtyError::Io {
-        path: parent.to_path_buf(),
+        path: parent.to_owned(),
         source,
     })?;
-    let temp = unique_sibling(store_path, "object")?;
-    let write_result = (|| -> Result<bool, PqtyError> {
-        let mut file = fs::OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .open(&temp)
-            .map_err(|source| PqtyError::Io {
-                path: temp.clone(),
-                source,
-            })?;
-        file.write_all(bytes).map_err(|source| PqtyError::Io {
-            path: temp.clone(),
-            source,
-        })?;
-        file.sync_all().map_err(|source| PqtyError::Io {
-            path: temp.clone(),
-            source,
-        })?;
-        if publish_if_absent(&temp, store_path)? {
-            make_read_only(store_path)?;
-            Ok(true)
-        } else {
-            let existing = fs::read(store_path).map_err(|source| PqtyError::Io {
-                path: store_path.to_path_buf(),
-                source,
-            })?;
-            let got = hex::encode(Sha256::digest(existing));
-            if got != expected_hex {
-                return Err(PqtyError::Usage(format!(
-                    "conflicting content-addressed store object {}\n  expected: {expected_hex}\n  got:      {got}",
-                    store_path.display()
-                )));
-            }
-            make_read_only(store_path)?;
-            Ok(false)
-        }
-    })();
-    if write_result.is_err() {
-        let _ = fs::remove_file(&temp);
+    file.as_file().sync_all().map_err(|source| PqtyError::Io {
+        path: file.path().to_owned(),
+        source,
+    })?;
+    let created = publish_if_absent(file, &path)?;
+    if !created && super::stream::digest_file(&path, crate::MAX_ARCHIVE_ENTRY_BYTES)?.0 != digest {
+        return Err(PqtyError::Usage(format!(
+            "conflicting content-addressed store object {}",
+            path.display()
+        )));
     }
-    write_result
+    make_read_only(&path)?;
+    Ok(StoredObject {
+        digest,
+        size,
+        created,
+    })
+}
+
+#[cfg(test)]
+pub(super) fn ensure_store_object(
+    store_dir: &Path,
+    store_path: &Path,
+    bytes: &[u8],
+    expected: &str,
+) -> Result<bool, PqtyError> {
+    if store_path != store_dir.join(&expected[..2]).join(expected) {
+        return Err(PqtyError::Usage(
+            "store path does not match digest".to_owned(),
+        ));
+    }
+    Ok(store_reader(store_dir, &mut &*bytes, Some(expected))?.created)
 }
 
 pub(super) fn quarantine_store_entry(
