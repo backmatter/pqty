@@ -256,40 +256,25 @@ fn copy_container(
     let started = Instant::now();
     let mut last = Instant::now();
     let mut hash = Sha512::new();
-    let mut size = 0_u64;
-    let mut buffer = vec![0; 64 * 1024];
-    loop {
-        let count = reader.read(&mut buffer).map_err(|source| PqtyError::Io {
-            path: provider.into(),
-            source,
-        })?;
-        if count == 0 {
-            break;
-        }
-        size += count as u64;
-        if size > expected_size {
-            return Err(PqtyError::Usage(format!(
-                "container size mismatch for {provider}: exceeds {expected_size}-byte limit"
-            )));
-        }
-        hash.update(&buffer[..count]);
-        writer
-            .write_all(&buffer[..count])
-            .map_err(|source| PqtyError::Io {
-                path: provider.into(),
-                source,
-            })?;
-        if report_progress && last.elapsed() >= DOWNLOAD_PROGRESS_INTERVAL {
-            progress::download_progress(
-                progress::DownloadCategory::Packages,
-                provider,
-                size,
-                Some(expected_size),
-                duration_millis(started.elapsed()),
-            );
-            last = Instant::now();
-        }
-    }
+    let size = super::stream::copy_observed(
+        reader,
+        writer,
+        expected_size,
+        Path::new(provider),
+        |bytes, size| {
+            hash.update(bytes);
+            if report_progress && last.elapsed() >= DOWNLOAD_PROGRESS_INTERVAL {
+                progress::download_progress(
+                    progress::DownloadCategory::Packages,
+                    provider,
+                    size,
+                    Some(expected_size),
+                    duration_millis(started.elapsed()),
+                );
+                last = Instant::now();
+            }
+        },
+    )?;
     if size != expected_size {
         return Err(PqtyError::Usage(format!(
             "container size mismatch for {provider}: expected {expected_size}, got {size}"
@@ -320,45 +305,28 @@ pub(super) fn read_bounded_download(
     started: Instant,
 ) -> Result<Vec<u8>, PqtyError> {
     let capacity = bytes_total
-        .and_then(|bytes| usize::try_from(bytes).ok())
+        .and_then(|bytes| usize::try_from(bytes.min(limit)).ok())
         .unwrap_or_default();
     let mut bytes = Vec::with_capacity(capacity);
-    let mut buffer = [0_u8; 16 * 1024];
     let mut last_emitted = Instant::now();
-
-    loop {
-        let remaining = limit.saturating_add(1).saturating_sub(bytes.len() as u64);
-        if remaining == 0 {
-            break;
-        }
-        let read_limit = usize::try_from(remaining.min(buffer.len() as u64))
-            .expect("read limit is bounded by the fixed buffer");
-        let read = reader
-            .read(&mut buffer[..read_limit])
-            .map_err(|source| PqtyError::Io {
-                path: PathBuf::from(description),
-                source,
-            })?;
-        if read == 0 {
-            break;
-        }
-        bytes.extend_from_slice(&buffer[..read]);
-        if bytes.len() as u64 > limit {
-            return Err(PqtyError::Usage(format!(
-                "{description} exceeded the {limit}-byte limit"
-            )));
-        }
-        if last_emitted.elapsed() >= DOWNLOAD_PROGRESS_INTERVAL {
-            progress::download_progress(
-                category,
-                item,
-                bytes.len() as u64,
-                bytes_total,
-                duration_millis(started.elapsed()),
-            );
-            last_emitted = Instant::now();
-        }
-    }
+    super::stream::copy_observed(
+        &mut reader,
+        &mut bytes,
+        limit,
+        Path::new(description),
+        |_, size| {
+            if last_emitted.elapsed() >= DOWNLOAD_PROGRESS_INTERVAL {
+                progress::download_progress(
+                    category,
+                    item,
+                    size,
+                    bytes_total,
+                    duration_millis(started.elapsed()),
+                );
+                last_emitted = Instant::now();
+            }
+        },
+    )?;
     Ok(bytes)
 }
 

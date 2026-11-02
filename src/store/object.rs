@@ -415,7 +415,7 @@ pub(super) struct StoredObject {
     pub(super) created: bool,
 }
 
-/// Publish immutable, content-addressed bytes using fixed-size buffers.
+/// Publish immutable, content-addressed bytes using standard-library-managed buffering.
 /// Provider manifests are published separately after complete validation.
 pub(super) fn store_reader(
     store_dir: &Path,

@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Delegate transfer buffering to standard I/O for package ingestion, download,
+  verification, and export. Callers and pqty implementation code no longer tune
+  transfer buffer sizes; artifact limits remain enforced.
+
 - Preserve declared TEXMF data dependencies across `Package`, `TLCore`, and
   `ConTeXt` categories, including script and configuration data. Keep platform
   binaries and distribution-root installer helpers outside file ownership lookup.

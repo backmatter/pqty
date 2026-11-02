@@ -1,10 +1,5 @@
 //! Public, offline projection of verified store bytes for lazy file consumers.
-use std::{
-    collections::BTreeMap,
-    fs::File,
-    io::{Read, Write},
-    path::Path,
-};
+use std::{collections::BTreeMap, fs::File, io::Write, path::Path};
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -146,7 +141,6 @@ pub fn export_file_manifest(lock: &LockFile, store: &Path) -> Result<FileManifes
     let mut objects = BTreeMap::new();
     let mut files = BTreeMap::new();
     let mut total = 0;
-    let mut buffer = vec![0; 64 * 1024];
     for provider in &lock.closure {
         let manifest = load_store_manifest(store, provider)?;
         for file in manifest.files {
@@ -154,8 +148,7 @@ pub fn export_file_manifest(lock: &LockFile, store: &Path) -> Result<FileManifes
             let size = if let Some(size) = objects.get(digest) {
                 *size
             } else {
-                let size =
-                    verify_object(&store.join(&digest[..2]).join(digest), digest, &mut buffer)?;
+                let size = verify_object(&store.join(&digest[..2]).join(digest), digest)?;
                 objects.insert(digest.to_string(), size);
                 size
             };
@@ -188,7 +181,7 @@ pub fn export_file_manifest(lock: &LockFile, store: &Path) -> Result<FileManifes
     Ok(manifest)
 }
 
-fn verify_object(path: &Path, expected: &str, buffer: &mut [u8]) -> Result<u64, PqtyError> {
+fn verify_object(path: &Path, expected: &str) -> Result<u64, PqtyError> {
     if !std::fs::symlink_metadata(path)
         .map_err(|source| PqtyError::Io {
             path: path.to_owned(),
@@ -212,23 +205,13 @@ fn verify_object(path: &Path, expected: &str, buffer: &mut [u8]) -> Result<u64, 
     {
         return Err(invalid("package store object is not a regular file"));
     }
-    let mut hash = Sha256::new();
-    let mut total = 0;
-    loop {
-        let count = file.read(buffer).map_err(|source| PqtyError::Io {
-            path: path.to_owned(),
-            source,
-        })?;
-        if count == 0 {
-            break;
-        }
-        total += count as u64;
-        if total > MAX_ARCHIVE_ENTRY_BYTES {
-            return Err(invalid("package store object exceeds the file size limit"));
-        }
-        hash.update(&buffer[..count]);
-    }
-    if hex::encode(hash.finalize()) != expected {
+    let (actual, total) = super::stream::copy_hashed(
+        &mut file,
+        &mut std::io::sink(),
+        MAX_ARCHIVE_ENTRY_BYTES,
+        path,
+    )?;
+    if actual != expected {
         return Err(invalid(format!(
             "corrupt content-addressed store object {}",
             path.display()

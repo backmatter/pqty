@@ -13,7 +13,6 @@ use std::io::{self, Read as _, Write as _};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-use sha2::{Digest as _, Sha256};
 
 use crate::{
     LinkMode, LockFile, PqtyError, ResolvedEnvironment, ResolvedPackage, canonical_or_original,
@@ -314,23 +313,7 @@ pub(super) fn stored_file_digest(digest: &str) -> Result<&str, PqtyError> {
 }
 
 fn file_digest(path: &Path) -> Result<String, PqtyError> {
-    let mut file = fs::File::open(path).map_err(|source| PqtyError::Io {
-        path: path.to_path_buf(),
-        source,
-    })?;
-    let mut hasher = Sha256::new();
-    let mut buffer = [0; 16384];
-    loop {
-        let count = file.read(&mut buffer).map_err(|source| PqtyError::Io {
-            path: path.to_path_buf(),
-            source,
-        })?;
-        if count == 0 {
-            break;
-        }
-        hasher.update(&buffer[..count]);
-    }
-    Ok(hex::encode(hasher.finalize()))
+    Ok(super::stream::digest_file(path, crate::MAX_ARCHIVE_ENTRY_BYTES)?.0)
 }
 
 fn verify_file_digest(path: &Path, expected: &str) -> Result<(), PqtyError> {

@@ -1,5 +1,4 @@
 //! Portable package bytes. No caller needs to know pqty's private store layout.
-#![allow(clippy::large_stack_arrays)]
 use super::install::stored_file_digest;
 use super::object::{
     StoredPackageManifest, load_store_manifest, package_digest, provider_manifest_digest,
@@ -8,7 +7,6 @@ use super::object::{
 use crate::{LockFile, PqtyError, unique_sibling, validate_materialized_lock};
 use flate2::{Compression, bufread::GzDecoder, write::GzEncoder};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs::{self, File},
@@ -54,23 +52,9 @@ fn append<W: Write, R: Read>(
         .map_err(|e| invalid(format!("Could not write package bundle: {e}")))
 }
 fn digest_file(path: &Path) -> Result<String, PqtyError> {
-    let mut file = File::open(path).map_err(|e| io(path, e))?;
-    let mut hash = Sha256::new();
-    let mut buffer = [0u8; 65536];
-    let mut total = 0;
-    loop {
-        let size = file.read(&mut buffer).map_err(|e| io(path, e))?;
-        if size == 0 {
-            break;
-        }
-        total += size as u64;
-        if total > MAX_FILE {
-            return Err(invalid("Package bundle file exceeds its size limit"));
-        }
-        hash.update(&buffer[..size]);
-    }
-    Ok(hex::encode(hash.finalize()))
+    Ok(super::stream::digest_file(path, MAX_FILE)?.0)
 }
+
 fn validate(bundle: &Bundle) -> Result<BTreeSet<String>, PqtyError> {
     if bundle.schema != BUNDLE_SCHEMA {
         return Err(invalid("Unsupported package bundle schema"));

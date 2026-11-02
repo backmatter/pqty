@@ -98,7 +98,7 @@ the complete locked file set, file ownership, and every content digest before
 publishing output. Missing, corrupt, or unsupported content fails without
 fetching or repairing anything. `--output` is atomic and stdout contains only
 artifact JSON. No second TEXMF tree is created. Shared objects are hashed once
-per export with a reusable 64 KiB buffer. Existing file and closure byte limits
+per export using standard I/O streaming. Existing file and closure byte limits
 apply (128 MiB per file and 8 GiB of expanded closure bytes).
 
 ### `pqty.files/v1`
@@ -174,12 +174,13 @@ or network requests occur.
 stream or staging destination. It verifies the complete file before writing and
 checks its digest and size again during copying. The caller must discard partial
 output on any error and commit it only after success. As with other store APIs,
-objects must remain immutable while being consumed. Copying uses a 64 KiB buffer;
-file and provider metadata still scale with the locked index.
+objects must remain immutable while being consumed. The standard library manages
+transfer buffering; neither users nor API callers choose chunk sizes. File and
+provider metadata still scale with the locked index.
 
 Initial hydration and exact-lock recovery process each selected file through a
-bounded hash/copy buffer. Remote containers download to a temporary file and are
-SHA-512/size verified before caching and decompression. Bounded decompression
+standard I/O hash/copy stream. Remote containers download to a temporary file
+and are SHA-512/size verified before caching and decompression. Bounded decompression
 stages a tar file on disk, then processes selected entries individually; the
 selected provider payload is not collected in memory. Existing file, archive,
 expansion, and closure limits remain enforced. Decoder working memory and the

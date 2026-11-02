@@ -14,7 +14,8 @@ use std::{
 ///
 /// No network, registry, or other package bytes are needed. The selected provider
 /// manifest and file are verified before the writer receives data. Copying uses
-/// a 64 KiB buffer and verifies the copied bytes again. The caller must discard
+/// standard-library-managed buffering and verifies copied bytes again. The caller
+/// must discard
 /// partial output on any error and publish it only after success. Store objects
 /// must remain immutable, as with all pqty store consumers.
 ///
