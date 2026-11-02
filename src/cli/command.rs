@@ -512,7 +512,7 @@ pub(super) fn refresh_existing_lock(
     expected_tlpdb_digest: Option<&str>,
     consumer_requirements: &ConsumerRequirements,
 ) -> Option<LockFile> {
-    if tlpdb.is_some() || !output.is_file() {
+    if tlpdb.is_some() || !output.is_file() || crate::has_registry_inputs(scanned) {
         return None;
     }
     let Ok(existing) = read_lock(output) else {
@@ -538,11 +538,18 @@ fn refresh_local_lock(
     requirements: &ConsumerRequirements,
 ) -> Option<LockFile> {
     use crate::PackageRegistry as _;
+    if crate::has_registry_inputs(scanned) {
+        return None;
+    }
     let existing = read_lock(output).ok()?;
     if validate_materialized_lock(&existing).is_err()
         || existing.registries != vec![index.registry()]
         || resolution_requirements(scanned) != resolution_requirements(&existing)
         || existing.consumer_requirements != *requirements
+        || existing.closure.iter().any(|entry| {
+            crate::resolved_from(index, &entry.provider, &index.registry().id).dependencies
+                != entry.dependencies
+        })
         || !crate::store::local_source_matches_lock(&existing, source, store)
     {
         return None;
@@ -607,7 +614,7 @@ pub(super) fn registry_selection_matches(
 }
 
 /// Only these declarations affect package resolution. Locations, source
-/// digests, local inputs, graphics, and bibliography database paths remain
+/// digests, graphics, and bibliography database paths remain
 /// important lock data, but changing them cannot change the provider closure.
 fn resolution_requirements(lock: &LockFile) -> BTreeSet<(String, String, bool)> {
     let mut requirements = BTreeSet::new();
@@ -632,6 +639,18 @@ fn resolution_requirements(lock: &LockFile) -> BTreeSet<(String, String, bool)> 
             package.resolved_path.is_some(),
         )
     }));
+    requirements.extend(
+        lock.inputs
+            .iter()
+            .filter(|input| matches!(input.kind, crate::InputKind::Input))
+            .map(|input| {
+                (
+                    "input".to_string(),
+                    input.name.clone(),
+                    input.resolved_path.is_some(),
+                )
+            }),
+    );
     requirements.extend(
         lock.bibliographies
             .iter()

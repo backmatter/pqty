@@ -74,6 +74,21 @@ pub fn hydrate_lock(
                     "provider closure exceeds the {MAX_CLOSURE_EXPANDED_BYTES}-byte expanded-content limit"
                 )));
             }
+            for request in &entry.runtime_requests {
+                if !materialized.files.iter().any(|file| {
+                    file.tds_path == *request
+                        || (!request.contains('/')
+                            && Path::new(&file.tds_path)
+                                .file_name()
+                                .and_then(|name| name.to_str())
+                                == Some(request))
+                }) {
+                    return Err(PqtyError::Usage(format!(
+                        "provider {} is missing requested runtime file {request}",
+                        entry.provider
+                    )));
+                }
+            }
             entry.integrity = Some(materialized.integrity);
             entry.store_key = Some(materialized.store_key);
             entry.files = materialized.files;
@@ -179,7 +194,8 @@ fn initial_runtime_queue(lock: &LockFile, files: &RuntimeFileIndex<'_>) -> VecDe
                     );
                 }
             }
-        } else if entry.direct {
+        }
+        if entry.direct {
             for request in &entry.satisfies {
                 for extension in ["sty", "cls", "bst"] {
                     let name = format!("{request}.{extension}");
@@ -193,7 +209,7 @@ fn initial_runtime_queue(lock: &LockFile, files: &RuntimeFileIndex<'_>) -> VecDe
                     }
                 }
             }
-        } else {
+        } else if entry.runtime_requests.is_empty() {
             queue.extend(
                 entry
                     .files
@@ -285,6 +301,16 @@ struct RuntimeProviderDiscovery {
 
 fn runtime_file_requests(command: &ParsedCommand) -> Vec<(String, &'static [&'static str])> {
     match command.name.as_str() {
+        "input" => command
+            .required
+            .iter()
+            .flat_map(|value| split_names(value))
+            .filter(|name| {
+                !name.contains(['/', '\\', '#', '{', '}'])
+                    && crate::validate_tds_path(name, "literal runtime input").is_ok()
+            })
+            .map(|name| (name, &["tex"][..]))
+            .collect(),
         "usepackage" | "RequirePackage" => command
             .required
             .iter()

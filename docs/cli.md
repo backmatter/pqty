@@ -293,6 +293,15 @@ determined.
 
 ## What the scanner recognizes
 
+Project-owned files take precedence for literal `\input` requests. Remaining
+literal names can resolve to unique registry files; ambiguous names fail during
+locking. `\include` remains project-owned, and computed names require runtime
+observations. Locks with non-project literal inputs revisit the selected registry
+when resolving again, while exact-lock installation remains offline-capable.
+
+Text bytes in comments and document bodies need not be UTF-8. Source digests
+cover the original bytes, and dependency arguments and paths must remain UTF-8.
+
 The project scanner follows local source files and records a digest for each
 one. It recognizes:
 

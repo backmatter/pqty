@@ -1,3 +1,4 @@
+mod inputs;
 mod language;
 mod model;
 mod resolution;
@@ -11,5 +12,6 @@ pub use model::{IndexPackage, PackageRegistry};
 pub use resolution::{require_runtime, resolve};
 pub use tlpdb::TlpdbIndex;
 
+pub(crate) use inputs::has_registry_inputs;
 pub(crate) use resolution::{normalized_consumer_requirements, resolved_from};
 pub(crate) use tlpdb::locate_tlpdb;

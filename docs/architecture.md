@@ -66,6 +66,23 @@ independent package version ranges. It:
 4. scans selected runtime files for additional explicit loads;
 5. records why each provider entered the closure.
 
+TeX Live categories do not distinguish all package data from engine support.
+Providers in `Package`, `TLCore`, and `ConTeXt` contribute declared TEXMF data
+and its dependencies. Binary-only, collection, and installation providers stay
+outside that closure. Ownership lookup excludes distribution-root installer
+helpers, including helpers inside otherwise valid data packages.
+
+Literal `\input` requests use project-owned files first. A unique registry file
+can supply a remaining literal request; ambiguous requests stay unresolved.
+Missing project includes and computed names are not guessed. Package hydration
+also follows bare literal inputs between package files. Named input changes
+participate in closure reuse decisions; non-project literal inputs require
+registry resolution again. Existing exact locks remain installable as captured.
+
+Source hashing uses original bytes. Scanning tolerates legacy text in comments
+and document bodies while requiring valid UTF-8 dependency arguments and paths;
+it does not reinterpret or rewrite source encoding for the engine.
+
 `latest` revalidates rolling metadata when resolution is required. Dated
 snapshots are immutable in the cache. Offline mode accepts cached dated data or
 an existing exact lock and rejects `latest`.

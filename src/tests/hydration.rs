@@ -38,8 +38,8 @@ fn hydration_adds_static_runtime_providers_and_skips_engine_components() {
         "name engine-core\n",
         "category TLCore\n",
         "revision 1\n",
-        "runfiles size=1\n",
-        " texmf-dist/tex/latex/engine-core/engine-core.sty\n",
+        "binfiles arch=test size=1\n",
+        " bin/test/engine\n",
     );
     let index = TlpdbIndex::parse(sample, &root.join("tlpkg/texlive.tlpdb"));
     let mut source = MemorySourceTree::default();

@@ -91,8 +91,8 @@ fn convergence_fixture() -> (PathBuf, TlpdbIndex, LockFile) {
         "name engine-core\n",
         "category TLCore\n",
         "revision 4\n",
-        "runfiles size=1\n",
-        " texmf-dist/tex/generic/engine/engine.tex\n",
+        "binfiles arch=test size=1\n",
+        " bin/test/engine\n",
     );
     fs::write(&tlpdb, metadata).unwrap();
     for (path, bytes) in [
@@ -145,6 +145,7 @@ fn convergence_fixture() -> (PathBuf, TlpdbIndex, LockFile) {
 mod environment;
 mod hydration;
 mod language;
+mod package_data;
 mod protocol;
 mod registry;
 mod scanner;

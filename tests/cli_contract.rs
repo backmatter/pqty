@@ -535,6 +535,67 @@ fn fixture_lock(root: &Path) -> serde_json::Value {
 }
 
 #[test]
+fn local_refresh_repairs_a_legacy_closure_missing_declared_core_data() {
+    let (root, tlpdb) = create_fixture();
+    let metadata = fs::read_to_string(&tlpdb)
+        .unwrap()
+        .replace("name foo\n", "name foo\ndepend core-data\n");
+    fs::write(&tlpdb, format!("{metadata}\nname core-data\ncategory TLCore\nrevision 1\nrunfiles size=1\n RELOC/web2c/data.tcx\n")).unwrap();
+    let data = root.join("texmf-dist/web2c/data.tcx");
+    fs::create_dir_all(data.parent().unwrap()).unwrap();
+    fs::write(data, b"% core data").unwrap();
+    lock_local_fixture(&root, &tlpdb);
+    let lock_path = root.join("pqty.lock");
+    let mut legacy = pqty::read_lock(&lock_path).unwrap();
+    legacy.closure.retain(|entry| entry.provider != "core-data");
+    for entry in &mut legacy.closure {
+        entry.dependencies.retain(|name| name != "core-data");
+    }
+    // This remains a valid old exact artifact; refreshing with metadata must
+    // check its data dependencies rather than reusing that incomplete graph.
+    pqty::write_lock(&lock_path, &legacy).unwrap();
+    lock_local_fixture(&root, &tlpdb);
+    let repaired = pqty::read_lock(&lock_path).unwrap();
+    assert!(
+        repaired
+            .closure
+            .iter()
+            .any(|entry| entry.provider == "core-data")
+    );
+    assert_eq!(
+        repaired
+            .closure
+            .iter()
+            .find(|entry| entry.provider == "foo")
+            .unwrap()
+            .dependencies,
+        ["core-data"]
+    );
+    make_tree_writable(&root);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn literal_input_changes_and_project_overrides_refresh_the_correct_closure() {
+    let (root, tlpdb) = create_fixture();
+    for (input, provider) in [("foo.sty", "foo"), ("baz.sty", "baz")] {
+        fs::write(root.join("main.tex"), format!("\\input{{{input}}}")).unwrap();
+        lock_local_fixture(&root, &tlpdb);
+        let lock = pqty::read_lock(&root.join("pqty.lock")).unwrap();
+        assert!(lock.unresolved.is_empty());
+        assert_eq!(lock.closure.len(), 1);
+        assert_eq!(lock.closure[0].provider, provider);
+    }
+    fs::write(root.join("baz.sty"), b"% project override").unwrap();
+    lock_local_fixture(&root, &tlpdb);
+    let lock = pqty::read_lock(&root.join("pqty.lock")).unwrap();
+    assert!(lock.closure.is_empty());
+    assert_eq!(lock.inputs[0].resolved_path.as_deref(), Some("baz.sty"));
+    make_tree_writable(&root);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn local_lock_reuse_checks_source_bytes_metadata_and_requirements() {
     let (root, tlpdb) = create_fixture();
     lock_local_fixture(&root, &tlpdb);

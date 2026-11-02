@@ -1,0 +1,65 @@
+name alpha
+category Package
+revision 1
+depend core-data
+depend context-data
+depend engine-core
+depend installer
+depend doc-only
+depend collection-data
+runfiles size=1
+ RELOC/tex/latex/alpha/alpha.sty
+
+name core-data
+category TLCore
+revision 1
+depend script-data
+runfiles size=1
+ RELOC/web2c/data.tcx
+
+name context-data
+category ConTeXt
+revision 1
+runfiles size=1
+ RELOC/tex/context/third/demo/module.mkiv
+
+name script-data
+category Package
+revision 1
+runfiles size=1
+ RELOC/scripts/demo/module.lua
+
+name engine-core
+category TLCore
+revision 1
+binfiles arch=test size=1
+ bin/test/engine
+
+name installer
+category TLCore
+revision 1
+runfiles size=1
+ tlpkg/private/module.lua
+
+name doc-only
+category Package
+revision 1
+runfiles size=1
+ RELOC/doc/demo/example.tex
+
+name collection-data
+category Collection
+revision 1
+depend engine-core
+
+name amstex
+category Package
+revision 1
+runfiles size=1
+ RELOC/tex/amstex/amstex.tex
+
+name support
+category Package
+revision 1
+runfiles size=1
+ RELOC/tex/generic/support/support.tex

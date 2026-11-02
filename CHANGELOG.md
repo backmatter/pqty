@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Preserve declared TEXMF data dependencies across `Package`, `TLCore`, and
+  `ConTeXt` categories, including script and configuration data. Keep platform
+  binaries and distribution-root installer helpers outside file ownership lookup.
+- Resolve unique literal `\input` requests after project lookup, follow bare
+  literal inputs in package files, and refresh closures when input targets or
+  declared data dependencies change. Preserve existing v1 artifact formats.
+- Scan legacy text bytes without changing source digests or rewriting files;
+  dependency arguments still require valid UTF-8.
+
 ### Added
 
 - Resolve explicit language names and aliases from TeX Live `AddHyphen`

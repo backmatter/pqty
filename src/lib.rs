@@ -135,7 +135,9 @@ pub use registry::{
     HyphenationDeclaration, IndexPackage, LANGUAGES_SCHEMA, LanguageAttribute, LanguageManifest,
     PackageRegistry, ResolvedLanguage, TlpdbIndex, require_languages, require_runtime, resolve,
 };
-pub(crate) use registry::{locate_tlpdb, normalized_consumer_requirements, resolved_from};
+pub(crate) use registry::{
+    has_registry_inputs, locate_tlpdb, normalized_consumer_requirements, resolved_from,
+};
 
 mod store;
 pub use store::{

@@ -98,6 +98,18 @@ fn source_only_changes_refresh_without_resolving_the_closure() {
         )
         .is_none()
     );
+    let input = scanned(br"\usepackage{foo}\input{library}");
+    assert!(
+        refresh_existing_lock(
+            &input,
+            &output,
+            None,
+            Some(&registry),
+            Some(&"11".repeat(32)),
+            &ConsumerRequirements::default()
+        )
+        .is_none()
+    );
     let _ = fs::remove_dir_all(root);
 }
 

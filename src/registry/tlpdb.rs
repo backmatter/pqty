@@ -256,6 +256,9 @@ fn index_runfiles(
     by_path: &mut BTreeMap<String, Vec<String>>,
 ) {
     for file in &record.files {
+        if !super::model::is_texmf_runfile(file) {
+            continue;
+        }
         let (_, normalized) = normalize_runfile(file);
         by_path
             .entry(normalized)
@@ -558,6 +561,9 @@ impl TlpdbIndex {
             for runfile in &package.runfiles {
                 let (_, normalized) = normalize_runfile(runfile);
                 digest.update(normalized.as_bytes());
+                if !super::model::is_texmf_runfile(runfile) {
+                    continue;
+                }
                 self.by_path
                     .entry(normalized)
                     .or_default()
