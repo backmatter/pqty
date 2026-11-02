@@ -120,6 +120,16 @@ with per-file content hashes and sizes. `FileManifest::validate` binds that
 metadata to an exact lock without exposing the private store layout. A caller
 must also verify received bytes against their declared hashes and sizes.
 
+`copy_verified_file` streams one exact locked TDS path to a caller-owned writer
+after verification. The caller commits output only after success. `export_file`
+provides atomic file publication. Both work offline without an installed TEXMF
+tree or access to unrelated objects.
+
+`TlpdbIndex::font_map_manifest` projects typed Map/MixedMap/KanjiMap declarations
+and unresolved profile templates for an exact lock. `FontMapManifest::validate`
+binds that projection to the lock and its registry; hosts own profile selection
+and map generation.
+
 ### Runtime convergence
 
 `converge_trace` transactionally attempts to extend an exact lock with

@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/backmatter/pqty/main/schemas/pqty.font-maps.schema.json",
+  "title": "pqty.font-maps/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "registry",
+    "environment_fingerprint",
+    "maps"
+  ],
+  "properties": {
+    "schema": {
+      "const": "pqty.font-maps/v1"
+    },
+    "registry": {
+      "$ref": "#/$defs/registry"
+    },
+    "environment_fingerprint": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "maps": {
+      "type": "array",
+      "maxItems": 1000000,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "provider",
+          "declaration",
+          "tds_path"
+        ],
+        "properties": {
+          "provider": {
+            "type": "string",
+            "minLength": 1
+          },
+          "tds_path": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/virtual_path"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "declaration": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "name",
+              "parameters"
+            ],
+            "properties": {
+              "kind": {
+                "enum": [
+                  "map",
+                  "mixed-map",
+                  "kanji-map"
+                ]
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "parameters": {
+                "type": "array",
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9_]+$"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "registry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "url",
+        "metadata_digest"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "const": "tlnet"
+        },
+        "url": {
+          "type": "string",
+          "minLength": 1
+        },
+        "snapshot": {
+          "type": "string"
+        },
+        "metadata_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        }
+      }
+    },
+    "virtual_path": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?![A-Za-z]:)(?!.*\\\\)(?!.*[\\u0000-\\u001F\\u007F])(?!.*(?:^|/)(?:\\.|\\.\\.)(?:/|$))(?!.*//).+$"
+    }
+  }
+}

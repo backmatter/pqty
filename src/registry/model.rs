@@ -74,6 +74,8 @@ pub struct IndexPackage {
     pub depends: Vec<String>,
     /// `execute addMap` / `execute addMixedMap` registry actions.
     pub font_maps: Vec<String>,
+    /// Typed Map/MixedMap/KanjiMap declarations, including unresolved templates.
+    pub font_map_declarations: Vec<super::font_map::FontMapDeclaration>,
     /// Engine-neutral `execute AddHyphen` language declarations.
     pub hyphenation: Vec<super::language::HyphenationDeclaration>,
     /// Runtime files (relative to TEXMF root), used by `materialize`.

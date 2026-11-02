@@ -17,8 +17,9 @@ protocol fields. Plain `capabilities` continues to emit v1. Unsupported
 capability schema selectors fail. Existing v1 lock, environment, trace, and
 bundle formats are unchanged; their frozen compatibility fixtures remain valid.
 
-The Rust API adds `IndexPackage.hyphenation`; callers constructing that public
-struct directly must initialize the new field.
+The Rust API adds `IndexPackage.hyphenation` and
+`IndexPackage.font_map_declarations`; callers constructing that public struct
+directly must initialize both fields.
 
 ## Explicit language requirements
 
@@ -122,6 +123,8 @@ not publisher authentication.
 The manifest contains neither store paths nor URLs. A host can obtain bytes
 through the existing public TEXMF installation or portable bundle interfaces,
 publish them using its own transport, and key its cache by content digest.
+The public `copy_verified_file` and `export_file` APIs below also provide direct
+access to a selected file, without store paths, a full bundle, or a TEXMF tree.
 The host owns URLs, authorization, HTTP caching, browser storage and eviction,
 and worker delivery. Compilation can reuse cached package bytes locally;
 this export does not add a compilation RPC or project synchronization step.
@@ -152,3 +155,78 @@ failure and returns the language manifest; its successful result is resolved
 and needs normal hydration before exact installation. None of these APIs runs
 an engine or guesses that a project's dependency set is complete on unobserved
 execution paths.
+
+## Single-file bytes and bounded ingestion
+
+```sh
+pqty --no-config --offline file --lock pqty.lock --store .pqty/store \
+  --path tex/latex/base/article.cls --output article.cls
+```
+
+`export_file(&lock, store, tds_path, output)` atomically publishes the requested
+file and returns its `ManifestFile` metadata. It validates the exact lock, the
+selected provider manifest, and the selected object's digest before export.
+Existing output survives errors; paths inside the store are rejected. Other
+package files and upstream registry metadata need not be available. No recovery
+or network requests occur.
+
+`copy_verified_file(&lock, store, tds_path, &mut writer)` supports a host-owned
+stream or staging destination. It verifies the complete file before writing and
+checks its digest and size again during copying. The caller must discard partial
+output on any error and commit it only after success. As with other store APIs,
+objects must remain immutable while being consumed. Copying uses a 64 KiB buffer;
+file and provider metadata still scale with the locked index.
+
+Initial hydration and exact-lock recovery process each selected file through a
+bounded hash/copy buffer. Remote containers download to a temporary file and are
+SHA-512/size verified before caching and decompression. Bounded decompression
+stages a tar file on disk, then processes selected entries individually; the
+selected provider payload is not collected in memory. Existing file, archive,
+expansion, and closure limits remain enforced. Decoder working memory and the
+registry/source scanner have separate memory costs. This is an implementation
+bound on byte copying, not a measured process RSS or speed claim.
+
+Incomplete remote archives or failed provider integrity checks never publish a
+package manifest or become exact. Valid content-addressed objects written before
+a later provider failure can remain in the store. A later closure failure can
+also leave complete verified providers, as can an interrupted installation.
+Portable bundle imports also publish individual staged objects with bounded
+copying; bundle and v1 provider identities are unchanged.
+
+## Typed font-map metadata
+
+```sh
+pqty --no-config capabilities --schema pqty.capabilities/v3
+pqty --no-config --offline font-maps --lock pqty.lock -o font-maps.json
+```
+
+Opt-in v3 capabilities include the unchanged v2 fields plus `font_maps_schema`
+(`pqty.font-maps/v1`) and `file_export` (`true`). Default v1 and opted-in v2
+capabilities, and all existing lock/environment/file/bundle schemas, remain
+unchanged. The existing v1 `font_maps` list retains its original concrete
+Map/MixedMap filename semantics.
+
+[`pqty.font-maps/v1`](../schemas/pqty.font-maps.schema.json) contains `schema`,
+`registry`, `environment_fingerprint`, and `maps`. It projects every declaration
+from the exact lock's provider closure, sorted by provider, registration kind
+(Map, MixedMap, KanjiMap), and name, with duplicate declarations removed.
+Each entry contains:
+
+- `provider`: the declaring registry provider;
+- `declaration.kind`: `map`, `mixed-map`, or `kanji-map`;
+- `declaration.name`: the original registry basename or template;
+- `declaration.parameters`: sorted unique names inside paired `@` markers;
+- `tds_path`: the concrete locked file path, or null for a profile template.
+
+Concrete declarations must resolve to one registry path and owner and be present
+in the lock; cross-provider ownership is allowed. Missing or ambiguous files
+fail explicitly. Templates such as `ptex-@jaEmbed@@jaVariant@.map` preserve both
+parameters without pretending the template is an available file. The host
+selects a profile/backend and requests its concrete files through existing
+runtime requirements. pqty neither expands templates nor executes registry
+commands. Availability of a KanjiMap does not imply support in an engine.
+
+`TlpdbIndex::font_map_manifest(&lock)` creates this projection and
+`FontMapManifest::validate(&lock, &index)` verifies its complete metadata and
+ordering against the original snapshot. It does not read file contents. Retain
+the manifest when the consuming host needs metadata without the registry.

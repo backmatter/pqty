@@ -2,6 +2,16 @@
 fn machine_readable_schemas_match_the_rust_protocol_constants() {
     for (text, expected_id, expected_const) in [
         (
+            include_str!("../../schemas/pqty.font-maps.schema.json"),
+            "https://raw.githubusercontent.com/backmatter/pqty/main/schemas/pqty.font-maps.schema.json",
+            crate::FONT_MAPS_SCHEMA,
+        ),
+        (
+            include_str!("../../schemas/pqty.capabilities-v3.schema.json"),
+            "https://raw.githubusercontent.com/backmatter/pqty/main/schemas/pqty.capabilities-v3.schema.json",
+            "pqty.capabilities/v3",
+        ),
+        (
             include_str!("../../schemas/pqty.files.schema.json"),
             "https://raw.githubusercontent.com/backmatter/pqty/main/schemas/pqty.files.schema.json",
             crate::FILE_MANIFEST_SCHEMA,

@@ -20,6 +20,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Stream provider ingestion, locked recovery, and bundle object publication
+  through bounded buffers instead of retaining complete provider contents.
+- Export one verified locked file offline through `file`, `copy_verified_file`,
+  and atomic `export_file`, without a TEXMF tree or private store paths.
+- Preserve typed Map/MixedMap/KanjiMap declarations and profile templates in
+  `pqty.font-maps/v1`, exposed by `font-maps` and `font_map_manifest`.
+  Opt-in capabilities v3 advertises the new interfaces; v1 and v2 are unchanged.
+  The Rust API adds `IndexPackage.font_map_declarations`.
+
 - Resolve explicit language names and aliases from TeX Live `AddHyphen`
   declarations, retaining loaders, patterns, exceptions, minima, and attributes.
   `lock --require-language`, `require --language`, and `languages` use exact

@@ -114,6 +114,7 @@ struct TlpdbRecord {
     container_size: Option<u64>,
     depends: Vec<String>,
     font_maps: Vec<String>,
+    font_map_declarations: Vec<super::font_map::FontMapDeclaration>,
     hyphenation: Vec<super::language::HyphenationDeclaration>,
     files: Vec<String>,
     in_runfiles: bool,
@@ -292,6 +293,7 @@ fn insert_package(
                 .unwrap_or_else(|| "Package".to_string()),
             depends: std::mem::take(&mut record.depends),
             font_maps: std::mem::take(&mut record.font_maps),
+            font_map_declarations: std::mem::take(&mut record.font_map_declarations),
             hyphenation: std::mem::take(&mut record.hyphenation),
             runfiles: std::mem::take(&mut record.files),
             container_checksum: record.container_checksum.take(),
@@ -369,6 +371,12 @@ fn parse_record_field(
         "category" => record.category = Some(rest.to_string()),
         "depend" => record.depends.push(rest.to_string()),
         "execute" => {
+            if let Some(map) = super::font_map::parse_font_map(rest)? {
+                if record.font_map_declarations.len() >= MAX_PROVIDER_RUNFILES {
+                    return Err(PqtyError::Usage("too many font-map declarations".into()));
+                }
+                record.font_map_declarations.push(map);
+            }
             if let Some(declaration) = super::language::parse_add_hyphen(rest)? {
                 if record.hyphenation.len() >= MAX_PROVIDER_RUNFILES {
                     return Err(PqtyError::Usage(

@@ -1,21 +1,19 @@
 use crate::store::DOWNLOAD_PROGRESS_INTERVAL;
-use crate::store::archive::{
-    container_expanded_limit, extract_required_container, validate_container_bytes,
-};
+use crate::store::archive::{container_expanded_limit, extract_required_container};
 use crate::store::http::{
-    DEFAULT_TLNET_CONTAINER_FALLBACKS, HttpGetOutcome, get_with_safe_redirects, read_file_bounded,
-    response_header, validate_remote_url,
+    DEFAULT_TLNET_CONTAINER_FALLBACKS, HttpGetOutcome, get_with_safe_redirects, response_header,
+    validate_remote_url,
 };
 
 use std::fs;
-use std::io::Read;
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use sha2::{Digest as _, Sha256};
+use sha2::{Digest as _, Sha256, Sha512};
 
 use crate::{
-    DEFAULT_TLNET, MAX_CONTAINER_COMPRESSED_BYTES, PqtyError, atomic_write, progress,
+    DEFAULT_TLNET, MAX_CONTAINER_COMPRESSED_BYTES, PqtyError, progress, unique_sibling,
     validate_provider_identifier,
 };
 
@@ -32,7 +30,8 @@ pub(super) struct ContainerRequest<'a> {
 
 pub(super) fn fetch_container_runfiles(
     request: &ContainerRequest<'_>,
-) -> Result<Vec<(String, Vec<u8>)>, PqtyError> {
+    visitor: &mut super::FileVisitor<'_>,
+) -> Result<(), PqtyError> {
     let base_url = request.base_url;
     let cache_dir = request.cache_dir;
     let provider = request.provider;
@@ -77,51 +76,58 @@ pub(super) fn fetch_container_runfiles(
             "container {provider} declares {compressed_limit} bytes; maximum supported size is {MAX_CONTAINER_COMPRESSED_BYTES}"
         )));
     }
-    let (compressed, downloaded) = if cache_path.is_file() {
-        (read_file_bounded(&cache_path, compressed_limit)?, false)
-    } else if offline {
-        return Err(PqtyError::Usage(format!(
-            "offline mode requires cached container content for provider {provider}"
-        )));
-    } else {
+    let checksum = expected_sha512.expect("validated checksum");
+    let size = expected_size.expect("validated size");
+    if !cache_path.is_file() {
+        if offline {
+            return Err(PqtyError::Usage(format!(
+                "offline mode requires cached container content for provider {provider}"
+            )));
+        }
         fs::create_dir_all(cache_dir).map_err(|source| PqtyError::Io {
-            path: cache_dir.to_path_buf(),
+            path: cache_dir.to_owned(),
             source,
         })?;
-        let expected_sha512 = expected_sha512.expect("validated checksum");
-        let expected_size = expected_size.expect("validated size");
-        (
-            fetch_container_from_candidates(
-                &urls,
-                provider,
-                expected_sha512,
-                expected_size,
-                compressed_limit,
-                allow_insecure,
-            )?,
-            true,
-        )
-    };
-
-    validate_container_bytes(
-        provider,
-        &compressed,
-        expected_sha512.expect("validated checksum"),
-        expected_size.expect("validated size"),
-    )?;
-    if downloaded {
-        atomic_write(&cache_path, &compressed)?;
+        fetch_container_from_candidates(
+            &urls,
+            provider,
+            checksum,
+            size,
+            compressed_limit,
+            allow_insecure,
+            &cache_path,
+        )?;
     }
-
+    // Verify the open handle before decompression, including cached containers.
+    let mut compressed = fs::File::open(&cache_path).map_err(|source| PqtyError::Io {
+        path: cache_path.clone(),
+        source,
+    })?;
+    copy_container(
+        &mut compressed,
+        &mut std::io::sink(),
+        provider,
+        checksum,
+        size,
+        false,
+    )?;
+    compressed
+        .seek(SeekFrom::Start(0))
+        .map_err(|source| PqtyError::Io {
+            path: cache_path.clone(),
+            source,
+        })?;
     extract_required_container(
-        &compressed,
+        std::io::BufReader::new(compressed),
         &cache_path,
         provider,
         runfiles,
-        container_expanded_limit(compressed.len() as u64),
+        container_expanded_limit(size),
+        visitor,
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn fetch_container_from_candidates(
     urls: &[String],
     provider: &str,
@@ -129,7 +135,8 @@ fn fetch_container_from_candidates(
     expected_size: u64,
     compressed_limit: u64,
     allow_insecure: bool,
-) -> Result<Vec<u8>, PqtyError> {
+    cache_path: &Path,
+) -> Result<(), PqtyError> {
     let mut errors = Vec::new();
     for (attempt, candidate) in urls.iter().enumerate() {
         progress::download_start(
@@ -146,8 +153,9 @@ fn fetch_container_from_candidates(
             expected_size,
             compressed_limit,
             allow_insecure,
+            cache_path,
         ) {
-            Ok(bytes) => return Ok(bytes),
+            Ok(()) => return Ok(()),
             Err(error) => errors.push(format!("{candidate}: {error}")),
         }
     }
@@ -170,6 +178,7 @@ pub(super) fn container_urls(base_url: &str, provider: &str) -> Vec<String> {
         .collect()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn fetch_verified_container(
     url: &str,
     provider: &str,
@@ -177,7 +186,8 @@ fn fetch_verified_container(
     expected_size: u64,
     compressed_limit: u64,
     allow_insecure: bool,
-) -> Result<Vec<u8>, PqtyError> {
+    cache_path: &Path,
+) -> Result<(), PqtyError> {
     let started = Instant::now();
     let response = match get_with_safe_redirects(url, allow_insecure, None, None)? {
         HttpGetOutcome::Response(response) => *response,
@@ -187,32 +197,110 @@ fn fetch_verified_container(
             )));
         }
     };
-    if let Some(length) = response_header(&response, &ureq::http::header::CONTENT_LENGTH)
+    if response_header(&response, &ureq::http::header::CONTENT_LENGTH)
         .and_then(|length| length.parse::<u64>().ok())
-        && length > compressed_limit
+        .is_some_and(|length| length > compressed_limit)
     {
         return Err(PqtyError::Usage(format!(
-            "container {provider} response declares {length} bytes; limit is {compressed_limit}"
+            "container {provider} response exceeds limit {compressed_limit}"
         )));
     }
-    let bytes = read_bounded_download(
-        response.into_body().into_reader(),
-        compressed_limit,
-        url,
-        progress::DownloadCategory::Packages,
-        provider,
-        Some(expected_size),
-        started,
-    )?;
-    validate_container_bytes(provider, &bytes, expected_sha512, expected_size)?;
-    progress::download_complete(
-        progress::DownloadCategory::Packages,
-        provider,
-        bytes.len() as u64,
-        Some(expected_size),
-        duration_millis(started.elapsed()),
-    );
-    Ok(bytes)
+    let temporary = unique_sibling(cache_path, "download")?;
+    let result = (|| {
+        let mut file = fs::File::options()
+            .create_new(true)
+            .write(true)
+            .open(&temporary)
+            .map_err(|source| PqtyError::Io {
+                path: temporary.clone(),
+                source,
+            })?;
+        copy_container(
+            &mut response.into_body().into_reader(),
+            &mut file,
+            provider,
+            expected_sha512,
+            expected_size,
+            true,
+        )?;
+        file.sync_all().map_err(|source| PqtyError::Io {
+            path: temporary.clone(),
+            source,
+        })?;
+        drop(file);
+        fs::rename(&temporary, cache_path).map_err(|source| PqtyError::Io {
+            path: cache_path.to_owned(),
+            source,
+        })?;
+        progress::download_complete(
+            progress::DownloadCategory::Packages,
+            provider,
+            expected_size,
+            Some(expected_size),
+            duration_millis(started.elapsed()),
+        );
+        Ok(())
+    })();
+    let _ = fs::remove_file(&temporary);
+    result
+}
+
+fn copy_container(
+    reader: &mut dyn Read,
+    writer: &mut dyn Write,
+    provider: &str,
+    checksum: &str,
+    expected_size: u64,
+    report_progress: bool,
+) -> Result<(), PqtyError> {
+    let started = Instant::now();
+    let mut last = Instant::now();
+    let mut hash = Sha512::new();
+    let mut size = 0_u64;
+    let mut buffer = vec![0; 64 * 1024];
+    loop {
+        let count = reader.read(&mut buffer).map_err(|source| PqtyError::Io {
+            path: provider.into(),
+            source,
+        })?;
+        if count == 0 {
+            break;
+        }
+        size += count as u64;
+        if size > expected_size {
+            return Err(PqtyError::Usage(format!(
+                "container size mismatch for {provider}: exceeds {expected_size}-byte limit"
+            )));
+        }
+        hash.update(&buffer[..count]);
+        writer
+            .write_all(&buffer[..count])
+            .map_err(|source| PqtyError::Io {
+                path: provider.into(),
+                source,
+            })?;
+        if report_progress && last.elapsed() >= DOWNLOAD_PROGRESS_INTERVAL {
+            progress::download_progress(
+                progress::DownloadCategory::Packages,
+                provider,
+                size,
+                Some(expected_size),
+                duration_millis(started.elapsed()),
+            );
+            last = Instant::now();
+        }
+    }
+    if size != expected_size {
+        return Err(PqtyError::Usage(format!(
+            "container size mismatch for {provider}: expected {expected_size}, got {size}"
+        )));
+    }
+    if hex::encode(hash.finalize()) != checksum {
+        return Err(PqtyError::Usage(format!(
+            "container checksum mismatch for {provider}"
+        )));
+    }
+    Ok(())
 }
 
 pub(super) fn container_cache_path(cache_dir: &Path, provider: &str, cache_key: &str) -> PathBuf {
@@ -276,4 +364,55 @@ pub(super) fn read_bounded_download(
 
 pub(super) fn duration_millis(duration: Duration) -> u64 {
     u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{net::TcpListener, thread};
+    fn serve(bytes: Vec<u8>) -> (String, thread::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let task = thread::spawn(move || {
+            let (mut socket, _) = listener.accept().unwrap();
+            socket
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let mut request = [0_u8; 4096];
+            let _ = socket.read(&mut request).unwrap();
+            write!(
+                socket,
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                bytes.len()
+            )
+            .unwrap();
+            socket.write_all(&bytes).unwrap();
+        });
+        (format!("http://{address}/container.tar.xz"), task)
+    }
+    #[test]
+    fn downloads_publish_only_complete_verified_containers_and_preserve_previous_cache() {
+        let root = crate::tests::temporary_test_root("download-stream");
+        fs::create_dir_all(&root).unwrap();
+        let output = root.join("container.tar.xz");
+        let bytes = b"verified synthetic container bytes";
+        let checksum = hex::encode(Sha512::digest(bytes));
+        let size = bytes.len() as u64;
+        let (url, task) = serve(bytes.to_vec());
+        fetch_verified_container(&url, "fixture", &checksum, size, size, true, &output).unwrap();
+        task.join().unwrap();
+        assert_eq!(fs::read(&output).unwrap(), bytes);
+        let broken = vec![b'x'; bytes.len()];
+        let (url, task) = serve(broken);
+        assert!(
+            fetch_verified_container(&url, "fixture", &checksum, size, size, true, &output)
+                .unwrap_err()
+                .to_string()
+                .contains("checksum mismatch")
+        );
+        task.join().unwrap();
+        assert_eq!(fs::read(&output).unwrap(), bytes);
+        assert_eq!(fs::read_dir(&root).unwrap().count(), 1);
+        fs::remove_dir_all(root).unwrap();
+    }
 }

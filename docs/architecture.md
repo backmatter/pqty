@@ -97,6 +97,13 @@ Published objects and manifests are immutable. Concurrent identical writers
 accept the same result; conflicting content fails. Corrupt content is
 quarantined before online recovery from the source recorded in the lock.
 
+Package ingestion copies and hashes one file at a time with bounded buffers,
+including exact-lock recovery and portable bundle object publication. Remote
+compressed containers are verified on disk before bounded decompression and
+per-entry processing. A provider manifest is published only after its complete
+required file set and integrity checks succeed; failed providers may leave valid
+unreferenced immutable objects.
+
 Installation first audits a matching destination against the exact lock. It
 hashes installed files with a bounded buffer and reconstructs the pinned provider
 manifests, so valid copied trees survive a cleared shared cache. Requested link
@@ -167,3 +174,8 @@ boundaries and the opt-in v2 capabilities contract.
 | `adapters/fls/` | Kpathsea recorder conversion |
 | `schemas/` | Machine-readable protocol schemas |
 | `tests/golden/` | Frozen compatibility artifacts |
+
+Typed font-map declarations retain registry Map/MixedMap/KanjiMap classes and
+unresolved profile templates in a separate snapshot-bound artifact. Existing
+v1 map lists and environment fingerprints retain their semantics. Hosts own
+profile selection, aggregate generation, and backend behavior.

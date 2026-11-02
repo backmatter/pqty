@@ -1,0 +1,19 @@
+name demo
+category Package
+revision 1
+depend concrete
+execute addMap demo.map
+execute addMixedMap bitmap.map
+execute addKanjiMap morisawa5.map
+execute addKanjiMap ptex-@jaEmbed@@jaVariant@.map
+runfiles size=1
+ RELOC/tex/latex/demo/demo.sty
+ RELOC/fonts/map/dvips/demo/demo.map
+ RELOC/fonts/map/dvips/demo/bitmap.map
+ RELOC/fonts/map/dvipdfmx/demo/ptex-noEmbed.map
+
+name concrete
+category Package
+revision 2
+runfiles size=1
+ RELOC/fonts/map/dvipdfmx/demo/morisawa5.map

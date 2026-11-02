@@ -2,8 +2,8 @@
 #![allow(clippy::large_stack_arrays)]
 use super::install::stored_file_digest;
 use super::object::{
-    StoredPackageManifest, ensure_store_object, load_store_manifest, package_digest,
-    provider_manifest_digest, write_store_manifest,
+    StoredPackageManifest, load_store_manifest, package_digest, provider_manifest_digest,
+    store_reader, write_store_manifest,
 };
 use crate::{LockFile, PqtyError, unique_sibling, validate_materialized_lock};
 use flate2::{Compression, bufread::GzDecoder, write::GzEncoder};
@@ -264,13 +264,8 @@ pub fn import_bundle(input: &Path, store: &Path) -> Result<LockFile, PqtyError> 
         // if a later manifest write fails; no source or active TEXMF tree is touched.
         for digest in &expected {
             let path = staging.join(digest);
-            let bytes = fs::read(&path).map_err(|e| io(&path, e))?;
-            ensure_store_object(
-                store,
-                &store.join(&digest[..2]).join(digest),
-                &bytes,
-                digest,
-            )?;
+            let mut file = File::open(&path).map_err(|e| io(&path, e))?;
+            store_reader(store, &mut file, Some(digest))?;
         }
         for provider in &bundle.lock.closure {
             write_store_manifest(

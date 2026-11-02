@@ -684,3 +684,73 @@ fn reused_local_lock_does_not_bypass_store_verification() {
     make_tree_writable(&root);
     fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn typed_maps_and_single_file_exports_have_negotiated_offline_cli_contracts() {
+    let root = temporary_root();
+    fs::create_dir_all(root.join("tlpkg")).unwrap();
+    let tlpdb = root.join("tlpkg/texlive.tlpdb");
+    let metadata = include_str!("fixtures/font-maps/texlive.tlpdb");
+    fs::write(&tlpdb, metadata).unwrap();
+    let index = pqty::TlpdbIndex::load(&tlpdb).unwrap();
+    for provider in ["demo", "concrete"] {
+        for file in &pqty::PackageRegistry::package(&index, provider)
+            .unwrap()
+            .runfiles
+        {
+            let path = root
+                .join("texmf-dist")
+                .join(file.strip_prefix("RELOC/").unwrap());
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, b"% fixture\n").unwrap();
+        }
+    }
+    fs::write(root.join("main.tex"), br"\usepackage{demo}").unwrap();
+    let capabilities =
+        run_ok(pqty(&root).args(["capabilities", "--schema", "pqty.capabilities/v3"]));
+    validate_json_schema(
+        include_str!("../schemas/pqty.capabilities-v3.schema.json"),
+        &capabilities.stdout,
+    );
+    let mut lock = pqty(&root);
+    lock.args(["--offline", "lock", "main.tex", "--store", "store"]);
+    arg_path(&mut lock, "--tlpdb", &tlpdb);
+    run_ok(&mut lock);
+    let mut maps = pqty(&root);
+    maps.args(["--offline", "font-maps", "--output", "maps.json"]);
+    run_ok(&mut maps);
+    let original = fs::read(root.join("maps.json")).unwrap();
+    validate_json_schema(
+        include_str!("../schemas/pqty.font-maps.schema.json"),
+        &original,
+    );
+    let parsed: pqty::FontMapManifest = serde_json::from_slice(&original).unwrap();
+    assert_eq!(parsed.maps.len(), 4);
+    let mut file = pqty(&root);
+    file.args([
+        "--offline",
+        "file",
+        "--store",
+        "store",
+        "--path",
+        "fonts/map/dvipdfmx/demo/morisawa5.map",
+        "--output",
+        "export.map",
+    ]);
+    let output = run_ok(&mut file);
+    assert!(output.stdout.is_empty());
+    assert_eq!(fs::read(root.join("export.map")).unwrap(), b"% fixture\n");
+    // File delivery needs neither upstream metadata nor the original source tree.
+    fs::write(&tlpdb, metadata.replace("revision 1", "revision 9")).unwrap();
+    let failure = maps.output().unwrap();
+    assert!(!failure.status.success());
+    assert_eq!(fs::read(root.join("maps.json")).unwrap(), original);
+    fs::remove_dir_all(root.join("texmf-dist")).unwrap();
+    fs::remove_file(&tlpdb).unwrap();
+    run_ok(&mut file);
+    file.args(["--path", "absent.map"]);
+    assert!(!file.output().unwrap().status.success());
+    assert_eq!(fs::read(root.join("export.map")).unwrap(), b"% fixture\n");
+    make_tree_writable(&root);
+    fs::remove_dir_all(root).unwrap();
+}

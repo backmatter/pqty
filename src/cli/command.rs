@@ -62,6 +62,36 @@ pub(super) fn run(cli: Cli) -> Result<(), PqtyError> {
             &crate::export_file_manifest(&read_lock(&lock)?, &context.config.store_dir(store))?,
             output.as_deref(),
         ),
+        Command::File {
+            lock,
+            store,
+            path,
+            output,
+        } => {
+            crate::export_file(
+                &read_lock(&lock)?,
+                &context.config.store_dir(store),
+                &path,
+                &output,
+            )?;
+            Ok(())
+        }
+        Command::FontMaps {
+            lock,
+            tlpdb,
+            tlpdb_url,
+            output,
+        } => {
+            let lock = read_lock(&lock)?;
+            let (index, _) = load_convergence_index(
+                &lock,
+                tlpdb,
+                tlpdb_url,
+                context.offline,
+                context.allow_insecure,
+            )?;
+            publish_json(&index.font_map_manifest(&lock)?, output.as_deref())
+        }
         command @ Command::Languages { .. } => run_languages(&context, command),
         command @ Command::Scan { .. } => run_scan(&context, command),
         command @ Command::Explain { .. } => run_explain(&context, command),
@@ -93,11 +123,15 @@ impl ExecutionContext {
 
 fn run_capabilities(schema: &str) -> Result<(), PqtyError> {
     let mut capabilities = serde_json::to_value(Capabilities::current())?;
-    if schema == "pqty.capabilities/v2" {
+    if matches!(schema, "pqty.capabilities/v2" | "pqty.capabilities/v3") {
         capabilities["schema"] = schema.into();
         capabilities["languages_schema"] = crate::LANGUAGES_SCHEMA.into();
         capabilities["file_manifest_schema"] = crate::FILE_MANIFEST_SCHEMA.into();
         capabilities["language_requirements"] = true.into();
+    }
+    if schema == "pqty.capabilities/v3" {
+        capabilities["font_maps_schema"] = crate::FONT_MAPS_SCHEMA.into();
+        capabilities["file_export"] = true.into();
     }
     println!("{}", serde_json::to_string_pretty(&capabilities)?);
     Ok(())

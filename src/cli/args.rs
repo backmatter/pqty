@@ -122,7 +122,7 @@ pub(super) enum Command {
     /// Print the stable JSON and CLI protocols supported by this binary.
     Capabilities {
         /// Select the capabilities contract. The default remains v1.
-        #[arg(long, default_value = "pqty.capabilities/v1", value_parser = ["pqty.capabilities/v1", "pqty.capabilities/v2"])]
+        #[arg(long, default_value = "pqty.capabilities/v1", value_parser = ["pqty.capabilities/v1", "pqty.capabilities/v2", "pqty.capabilities/v3"])]
         schema: String,
     },
     /// Export verified package file hashes and sizes, without installing a tree.
@@ -131,6 +131,29 @@ pub(super) enum Command {
         lock: PathBuf,
         #[arg(long)]
         store: Option<PathBuf>,
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
+    /// Atomically export one verified locked file without installing a tree.
+    File {
+        #[arg(long, default_value = "pqty.lock")]
+        lock: PathBuf,
+        #[arg(long)]
+        store: Option<PathBuf>,
+        /// Exact normalized TDS path, rather than a basename.
+        #[arg(long)]
+        path: String,
+        #[arg(short, long)]
+        output: PathBuf,
+    },
+    /// Export typed font-map declarations for an exact locked environment.
+    FontMaps {
+        #[arg(long, default_value = "pqty.lock")]
+        lock: PathBuf,
+        #[arg(long, conflicts_with = "tlpdb_url")]
+        tlpdb: Option<PathBuf>,
+        #[arg(long, conflicts_with = "tlpdb")]
+        tlpdb_url: Option<String>,
         #[arg(short, long)]
         output: Option<PathBuf>,
     },

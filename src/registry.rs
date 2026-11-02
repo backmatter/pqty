@@ -1,3 +1,7 @@
+mod font_map;
+pub use font_map::{
+    FONT_MAPS_SCHEMA, FontMapDeclaration, FontMapKind, FontMapManifest, ResolvedFontMap,
+};
 mod inputs;
 mod language;
 mod model;

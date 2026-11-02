@@ -261,14 +261,17 @@ pub(crate) fn take_container_runfile(
         .or_else(|| files.remove(runfile))
 }
 
-/// Collect a provider's runfiles as `(placement_path, bytes)` from the byte source.
-fn provider_bytes(
+// Visit provider files without retaining their contents between callbacks.
+type FileVisitor<'a> = dyn FnMut(&str, &mut dyn std::io::Read) -> Result<(), PqtyError> + 'a;
+
+fn visit_provider_files(
     source: &PackageByteSource,
     provider: &str,
     container_checksum: Option<&str>,
     container_size: Option<u64>,
     runfiles: &[String],
-) -> Result<Vec<(String, Vec<u8>)>, PqtyError> {
+    visitor: &mut FileVisitor<'_>,
+) -> Result<(), PqtyError> {
     validate_provider_identifier(provider, "provider")?;
     if runfiles.len() > MAX_PROVIDER_RUNFILES {
         return Err(PqtyError::Usage(format!(
@@ -278,26 +281,15 @@ fn provider_bytes(
     for runfile in runfiles {
         validate_tds_path(runfile, "registry runfile")?;
     }
-    let mut out = Vec::new();
     match source {
         PackageByteSource::Local { texmf_root } => {
             for runfile in runfiles {
-                let (placement, _bare) = normalize_runfile(runfile);
+                let (placement, _) = normalize_runfile(runfile);
                 let path = texmf_root.join(&placement);
-                match read_file_bounded(&path, MAX_ARCHIVE_ENTRY_BYTES) {
-                    Ok(bytes) => out.push((placement, bytes)),
-                    Err(PqtyError::Io { source, .. })
-                        if source.kind() == io::ErrorKind::NotFound =>
-                    {
-                        // Distribution packages can legitimately omit
-                        // documentation, generated aggregates, or other
-                        // optional files still listed by their installed
-                        // tlpdb. A local Exact Lock records the bytes that are
-                        // actually present. Validation below still rejects a
-                        // direct class/package/style request whose owning file
-                        // is absent.
-                    }
-                    Err(error) => return Err(error),
+                match std::fs::File::open(&path) {
+                    Ok(mut file) => visitor(&placement, &mut file)?,
+                    Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                    Err(source) => return Err(PqtyError::Io { path, source }),
                 }
             }
         }
@@ -307,26 +299,57 @@ fn provider_bytes(
             offline,
             allow_insecure,
         } => {
-            let files = fetch_container_runfiles(&ContainerRequest {
-                base_url,
-                cache_dir,
-                provider,
-                expected_sha512: container_checksum,
-                expected_size: container_size,
-                offline: *offline,
-                allow_insecure: *allow_insecure,
-                runfiles,
-            })?;
-            out.extend(files);
+            fetch_container_runfiles(
+                &ContainerRequest {
+                    base_url,
+                    cache_dir,
+                    provider,
+                    expected_sha512: container_checksum,
+                    expected_size: container_size,
+                    offline: *offline,
+                    allow_insecure: *allow_insecure,
+                    runfiles,
+                },
+                visitor,
+            )?;
         }
     }
-    Ok(out)
+    Ok(())
+}
+
+#[cfg(test)]
+fn provider_bytes(
+    source: &PackageByteSource,
+    provider: &str,
+    checksum: Option<&str>,
+    size: Option<u64>,
+    runfiles: &[String],
+) -> Result<Vec<(String, Vec<u8>)>, PqtyError> {
+    let mut files = Vec::new();
+    visit_provider_files(
+        source,
+        provider,
+        checksum,
+        size,
+        runfiles,
+        &mut |path, reader| {
+            files.push((
+                path.to_owned(),
+                http::read_bounded(reader, MAX_ARCHIVE_ENTRY_BYTES, path)?,
+            ));
+            Ok(())
+        },
+    )?;
+    Ok(files)
 }
 
 mod archive;
 mod bundle;
 mod container;
+mod file_export;
 mod file_manifest;
+mod stream;
+pub use file_export::{copy_verified_file, export_file};
 mod http;
 mod hydrate;
 mod install;
@@ -337,7 +360,7 @@ mod registry_cache;
 mod transaction;
 
 use container::{ContainerRequest, fetch_container_runfiles};
-use http::{read_file_bounded, validate_remote_url};
+use http::validate_remote_url;
 use registry_cache::{default_cache_dir, human_bytes};
 
 #[cfg(test)]
@@ -518,6 +541,90 @@ mod tests {
                 .to_string()
                 .contains("requires cached Registry Snapshot")
         );
+    }
+
+    #[test]
+    fn remote_streams_verify_the_container_and_complete_file_set_before_provider_publication() {
+        use crate::{
+            MemorySourceTree, TlpdbIndex, VirtualPath, hydrate_lock, resolve, scan_source,
+        };
+        use sha2::Sha512;
+        let root = temporary_test_root("remote-stream");
+        let cache = root.join("cache");
+        fs::create_dir_all(&cache).unwrap();
+        let runfile = "tex/latex/demo/demo.sty";
+        let tar = tar_bytes(&[
+            (runfile, b"% demo"),
+            ("tex/latex/ignored/ignored.sty", b"ignored"),
+        ]);
+        let mut compressed = Vec::new();
+        lzma_rs::xz_compress(&mut Cursor::new(tar), &mut compressed).unwrap();
+        let checksum = hex::encode(Sha512::digest(&compressed));
+        let cached = crate::store::container::container_cache_path(&cache, "demo", &checksum);
+        fs::write(&cached, &compressed).unwrap();
+        let metadata = format!(
+            "name demo\ncategory Package\nrevision 1\ncontainerchecksum {checksum}\ncontainersize {}\nrunfiles size=1\n RELOC/{runfile}\n",
+            compressed.len()
+        );
+        let mut index =
+            TlpdbIndex::try_parse(&metadata, &root.join("tlpkg/texlive.tlpdb")).unwrap();
+        index.origin = Some("https://example.invalid/tlnet".into());
+        let mut tree = MemorySourceTree::default();
+        tree.insert(VirtualPath::new("main.tex").unwrap(), br"\usepackage{demo}");
+        let scanned = scan_source(&tree, VirtualPath::new("main.tex").unwrap()).unwrap();
+        let source = PackageByteSource::tlnet("https://example.invalid/tlnet", &cache, true);
+        let mut lock = scanned.clone();
+        resolve(&mut lock, &index);
+        let store = root.join("store");
+        hydrate_lock(&mut lock, &index, &source, &store).unwrap();
+        assert_eq!(lock.closure[0].files.len(), 1);
+        let mut bytes = Vec::new();
+        crate::copy_verified_file(&lock, &store, runfile, &mut bytes).unwrap();
+        assert_eq!(bytes, b"% demo");
+        // A valid compressed container missing a required tail file must not
+        // publish a package manifest, even if earlier valid objects were staged.
+        let incomplete = metadata.replace(
+            &format!(" RELOC/{runfile}\n"),
+            &format!(" RELOC/{runfile}\n RELOC/tex/latex/demo/absent.tex\n"),
+        );
+        let index = TlpdbIndex::try_parse(&incomplete, &root.join("tlpkg/texlive.tlpdb")).unwrap();
+        let mut lock = scanned.clone();
+        resolve(&mut lock, &index);
+        let missing = root.join("missing-store");
+        assert!(hydrate_lock(&mut lock, &index, &source, &missing).is_err());
+        assert!(lock.closure[0].integrity.is_none());
+        assert!(!missing.join("manifests").exists());
+        // Cached corrupt compressed bytes are rejected before any selected file.
+        let mut broken = compressed.clone();
+        broken[0] ^= 1;
+        fs::write(&cached, broken).unwrap();
+        let mut visited = false;
+        assert!(
+            super::visit_provider_files(
+                &source,
+                "demo",
+                Some(&checksum),
+                Some(compressed.len() as u64),
+                &[format!("RELOC/{runfile}")],
+                &mut |_, _| {
+                    visited = true;
+                    Ok(())
+                }
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("checksum mismatch")
+        );
+        assert!(!visited);
+        assert!(!fs::read_dir(&cache).unwrap().any(|entry| {
+            entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .contains("expanded")
+        }));
+        crate::tests::make_test_tree_writable(&root);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

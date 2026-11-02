@@ -34,7 +34,7 @@ fn make_test_writable(path: &Path) {
     fs::set_permissions(path, permissions).unwrap();
 }
 
-fn make_test_tree_writable(path: &Path) {
+pub(crate) fn make_test_tree_writable(path: &Path) {
     if !path.exists() {
         return;
     }
@@ -151,3 +151,6 @@ mod registry;
 mod scanner;
 mod source;
 mod store;
+
+mod font_map;
+mod streaming;

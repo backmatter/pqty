@@ -132,8 +132,9 @@ pub(crate) use source::{
 
 mod registry;
 pub use registry::{
-    HyphenationDeclaration, IndexPackage, LANGUAGES_SCHEMA, LanguageAttribute, LanguageManifest,
-    PackageRegistry, ResolvedLanguage, TlpdbIndex, require_languages, require_runtime, resolve,
+    FONT_MAPS_SCHEMA, FontMapDeclaration, FontMapKind, FontMapManifest, HyphenationDeclaration,
+    IndexPackage, LANGUAGES_SCHEMA, LanguageAttribute, LanguageManifest, PackageRegistry,
+    ResolvedFontMap, ResolvedLanguage, TlpdbIndex, require_languages, require_runtime, resolve,
 };
 pub(crate) use registry::{
     has_registry_inputs, locate_tlpdb, normalized_consumer_requirements, resolved_from,
@@ -142,8 +143,8 @@ pub(crate) use registry::{
 mod store;
 pub use store::{
     BUNDLE_SCHEMA, FILE_MANIFEST_SCHEMA, FileManifest, ManifestFile, MaterializeReport,
-    PackageByteSource, export_bundle, export_file_manifest, hydrate_lock, import_bundle,
-    install_locked, materialize_from_store,
+    PackageByteSource, copy_verified_file, export_bundle, export_file, export_file_manifest,
+    hydrate_lock, import_bundle, install_locked, materialize_from_store,
 };
 #[cfg(test)]
 use store::{BoundedWriter, take_container_runfile};

@@ -1,12 +1,9 @@
-use crate::store::http::read_bounded;
 use crate::store::normalize_runfile;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
-
-use sha2::{Digest as _, Sha512};
 
 use crate::{
     MAX_ARCHIVE_ENTRY_BYTES, MAX_CONTAINER_EXPANDED_BYTES, MAX_PROVIDER_RUNFILES,
@@ -94,36 +91,14 @@ pub(super) fn container_expanded_limit(compressed_size: u64) -> u64 {
         .clamp(MIN_CONTAINER_EXPANDED_BYTES, MAX_CONTAINER_EXPANDED_BYTES)
 }
 
-/// Fetch a package container, verify its sha512 before extraction, and return
-/// only the requested regular-file entries.
-pub(super) fn validate_container_bytes(
-    provider: &str,
-    bytes: &[u8],
-    expected_sha512: &str,
-    expected_size: u64,
-) -> Result<(), PqtyError> {
-    if bytes.len() as u64 != expected_size {
-        return Err(PqtyError::Usage(format!(
-            "container size mismatch for {provider}\n  expected: {expected_size}\n  got:      {}",
-            bytes.len()
-        )));
-    }
-    let got = hex::encode(Sha512::digest(bytes));
-    if got != expected_sha512 {
-        return Err(PqtyError::Usage(format!(
-            "container checksum mismatch for {provider}\n  expected: {expected_sha512}\n  got:      {got}"
-        )));
-    }
-    Ok(())
-}
-
 pub(super) fn extract_required_container(
-    compressed: &[u8],
+    mut compressed: impl io::BufRead,
     cache_path: &Path,
     provider: &str,
     runfiles: &[String],
     expanded_limit: u64,
-) -> Result<Vec<(String, Vec<u8>)>, PqtyError> {
+    visitor: &mut super::FileVisitor<'_>,
+) -> Result<(), PqtyError> {
     if runfiles.len() > MAX_PROVIDER_RUNFILES {
         return Err(PqtyError::Usage(format!(
             "provider {provider} requests more than {MAX_PROVIDER_RUNFILES} archive entries"
@@ -145,9 +120,9 @@ pub(super) fn extract_required_container(
             limit: expanded_limit,
             description: provider.to_string(),
         };
-        lzma_rs::xz_decompress(&mut std::io::BufReader::new(compressed), &mut output).map_err(
-            |error| PqtyError::Usage(format!("xz decompress container {provider}: {error:?}")),
-        )?;
+        lzma_rs::xz_decompress(&mut compressed, &mut output).map_err(|error| {
+            PqtyError::Usage(format!("xz decompress container {provider}: {error:?}"))
+        })?;
         output.file.sync_all().map_err(|source| PqtyError::Io {
             path: expanded.clone(),
             source,
@@ -158,22 +133,23 @@ pub(super) fn extract_required_container(
         return Err(error);
     }
 
-    let extraction = (|| -> Result<Vec<(String, Vec<u8>)>, PqtyError> {
+    let extraction = (|| -> Result<(), PqtyError> {
         let file = fs::File::open(&expanded).map_err(|source| PqtyError::Io {
             path: expanded.clone(),
             source,
         })?;
-        extract_required_tar(file, provider, runfiles)
+        visit_required_tar(file, provider, runfiles, visitor)
     })();
     let _ = fs::remove_file(&expanded);
     extraction
 }
 
-pub(super) fn extract_required_tar(
+pub(super) fn visit_required_tar(
     reader: impl Read,
     provider: &str,
     runfiles: &[String],
-) -> Result<Vec<(String, Vec<u8>)>, PqtyError> {
+    visitor: &mut super::FileVisitor<'_>,
+) -> Result<(), PqtyError> {
     let container = PathBuf::from("<container>");
     let mut aliases = BTreeMap::new();
     let mut required = BTreeSet::new();
@@ -197,7 +173,7 @@ pub(super) fn extract_required_tar(
     }
 
     let mut archive = tar::Archive::new(reader);
-    let mut selected = BTreeMap::new();
+    let mut selected = BTreeSet::new();
     let mut selected_bytes = 0_u64;
     let entries = archive.entries().map_err(|source| PqtyError::Io {
         path: container.clone(),
@@ -248,29 +224,30 @@ pub(super) fn extract_required_tar(
                 "selected runfiles for {provider} exceed the {MAX_CONTAINER_EXPANDED_BYTES}-byte provider limit"
             )));
         }
-        let bytes = read_bounded(
-            &mut entry,
-            MAX_ARCHIVE_ENTRY_BYTES,
-            &format!("container entry {path}"),
-        )?;
-        if selected.insert(placement.clone(), bytes).is_some() {
+        if !selected.insert(placement.clone()) {
             return Err(PqtyError::Usage(format!(
                 "container for {provider} repeats required entry {path}"
             )));
         }
+        visitor(placement, &mut entry)?;
+        if entry.read(&mut [0_u8; 1]).map_err(|source| PqtyError::Io {
+            path: container.clone(),
+            source,
+        })? != 0
+        {
+            return Err(PqtyError::Usage(
+                "archive visitor did not consume its selected file".to_string(),
+            ));
+        }
     }
-    let selected_paths = selected.keys().cloned().collect::<BTreeSet<_>>();
-    let missing = required
-        .difference(&selected_paths)
-        .cloned()
-        .collect::<Vec<_>>();
+    let missing = required.difference(&selected).cloned().collect::<Vec<_>>();
     if !missing.is_empty() {
         return Err(PqtyError::Usage(format!(
             "container {provider} is missing required runfile(s): {}",
             missing.join(", ")
         )));
     }
-    Ok(selected.into_iter().collect())
+    Ok(())
 }
 
 fn validate_container_entry_path(path: &str, entry_type: tar::EntryType) -> Result<(), PqtyError> {
@@ -280,4 +257,21 @@ fn validate_container_entry_path(path: &str, entry_type: tar::EntryType) -> Resu
         path
     };
     validate_tds_path(path, "container entry path")
+}
+
+#[cfg(test)]
+pub(super) fn extract_required_tar(
+    reader: impl Read,
+    provider: &str,
+    runfiles: &[String],
+) -> Result<Vec<(String, Vec<u8>)>, PqtyError> {
+    let mut files = BTreeMap::new();
+    visit_required_tar(reader, provider, runfiles, &mut |path, reader| {
+        files.insert(
+            path.to_owned(),
+            crate::store::http::read_bounded(reader, MAX_ARCHIVE_ENTRY_BYTES, path)?,
+        );
+        Ok(())
+    })?;
+    Ok(files.into_iter().collect())
 }

@@ -159,7 +159,9 @@ trace format.
 
 Hosts can explicitly require complete language data with `--require-language`
 or `require --language`, query snapshot-bound declarations with `languages`,
-and export verified file hashes and sizes with `files`. See the
+export verified file hashes and sizes with `files`, and copy one locked file
+with `file`. Typed font-map declarations and profile templates are available
+through `font-maps`. See the
 [language and lazy-input guide](docs/lazy-inputs.md) for compatibility negotiation
 and offline browser-consumer contracts. Engines still activate and validate
 patterns; hosts still provide the file transport and cache.
