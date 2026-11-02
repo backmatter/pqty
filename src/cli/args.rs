@@ -120,7 +120,34 @@ pub(super) enum Command {
         lock: PathBuf,
     },
     /// Print the stable JSON and CLI protocols supported by this binary.
-    Capabilities {},
+    Capabilities {
+        /// Select the capabilities contract. The default remains v1.
+        #[arg(long, default_value = "pqty.capabilities/v1", value_parser = ["pqty.capabilities/v1", "pqty.capabilities/v2"])]
+        schema: String,
+    },
+    /// Export verified package file hashes and sizes, without installing a tree.
+    Files {
+        #[arg(long, default_value = "pqty.lock")]
+        lock: PathBuf,
+        #[arg(long)]
+        store: Option<PathBuf>,
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
+    /// Resolve explicit language declarations and their exact runtime paths.
+    Languages {
+        /// Optional lock binding the query to its exact registry snapshot.
+        #[arg(long)]
+        lock: Option<PathBuf>,
+        #[arg(long = "language", required = true)]
+        languages: Vec<String>,
+        #[arg(long, conflicts_with = "tlpdb_url")]
+        tlpdb: Option<PathBuf>,
+        #[arg(long, conflicts_with = "tlpdb")]
+        tlpdb_url: Option<String>,
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
     /// Print the dependency graph inferred from a root .tex file.
     Scan {
         /// Root TeX file to scan.
@@ -222,6 +249,9 @@ pub(super) enum Command {
         /// packages. May be repeated; pqty remains unaware of why it is needed.
         #[arg(long = "require-provider")]
         required_providers: Vec<String>,
+        /// Require a canonical `AddHyphen` language name or synonym. May be repeated.
+        #[arg(long = "require-language")]
+        required_languages: Vec<String>,
         /// Expected SHA-256 of the decompressed tlpdb metadata.
         #[arg(long)]
         tlpdb_sha256: Option<String>,
@@ -284,6 +314,9 @@ pub(super) enum Command {
         /// Registry provider to require. May be repeated.
         #[arg(long = "provider")]
         providers: Vec<String>,
+        /// Canonical `AddHyphen` language name or synonym. May be repeated.
+        #[arg(long = "language")]
+        languages: Vec<String>,
         /// Path to the exact texlive.tlpdb used by the lock.
         #[arg(long, conflicts_with = "tlpdb_url")]
         tlpdb: Option<PathBuf>,

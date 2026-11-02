@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Resolve explicit language names and aliases from TeX Live `AddHyphen`
+  declarations, retaining loaders, patterns, exceptions, minima, and attributes.
+  `lock --require-language`, `require --language`, and `languages` use exact
+  snapshot-bound package ownership and preserve the existing v1 lock format.
+- Export verified per-file hashes and sizes with `files` and
+  `export_file_manifest`, without materializing another TEXMF tree or exposing
+  private store paths. Add closed `pqty.files/v1` and `pqty.languages/v1` schemas.
+- Opt-in `capabilities --schema pqty.capabilities/v2` negotiation for these
+  contracts; the default capabilities output and existing v1 artifacts remain
+  compatible. The Rust API adds `IndexPackage.hyphenation`.
+
 ## [0.1.2](https://github.com/backmatter/pqty/compare/v0.1.1...v0.1.2) - 2026-10-28
 
 ### Fixed

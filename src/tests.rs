@@ -144,6 +144,7 @@ fn convergence_fixture() -> (PathBuf, TlpdbIndex, LockFile) {
 
 mod environment;
 mod hydration;
+mod language;
 mod protocol;
 mod registry;
 mod scanner;

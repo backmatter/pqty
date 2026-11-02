@@ -1,0 +1,14 @@
+{
+  "schema": "pqty.files/v1",
+  "fingerprint": "sha256:6825ef0f20e2455fb9c0e0d91a2f503d975f8900aab3e70210272945051af0a3",
+  "environment_fingerprint": "sha256:95ea8e9b9a2b0b5478a49763e115d9adb5f0a66d2f340f235bb28b08bbeb434a",
+  "files": [
+    {
+      "tds_path": "tex/latex/foo/foo.sty",
+      "owner": "foo",
+      "kind": "tex",
+      "digest": "sha256:69a2f5707973bb45fa187858c521bcb30d9ebd84cb2d511b4df66d8ef7ec89c4",
+      "size": 13
+    }
+  ]
+}

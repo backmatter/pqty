@@ -1,0 +1,24 @@
+name 00texlive.config
+category TLCore
+depend release/2026
+
+name hyphen-demo
+category Package
+revision 1
+depend hyphen-support
+execute AddHyphen name=demo synonyms=Demo,demo-alias lefthyphenmin=2 righthyphenmin=3 file=loadhyph-demo.tex file_patterns=hyph-demo.pat.txt file_exceptions=hyph-demo.hyp.txt luaspecial="disabled:example engine restriction"
+runfiles size=1
+ texmf-dist/tex/generic/hyph-demo/loadhyph-demo.tex
+
+name hyphen-data
+category Package
+revision 2
+runfiles size=1
+ texmf-dist/tex/generic/hyph-demo/hyph-demo.pat.txt
+ texmf-dist/tex/generic/hyph-demo/hyph-demo.hyp.txt
+
+name hyphen-support
+category Package
+revision 3
+runfiles size=1
+ texmf-dist/tex/generic/hyph-demo/hyph-support.tex

@@ -74,6 +74,8 @@ pub struct IndexPackage {
     pub depends: Vec<String>,
     /// `execute addMap` / `execute addMixedMap` registry actions.
     pub font_maps: Vec<String>,
+    /// Engine-neutral `execute AddHyphen` language declarations.
+    pub hyphenation: Vec<super::language::HyphenationDeclaration>,
     /// Runtime files (relative to TEXMF root), used by `materialize`.
     pub runfiles: Vec<String>,
     /// sha512 of the `.tar.xz` container. Present only in the tlnet tlpdb, not

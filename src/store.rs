@@ -326,11 +326,13 @@ fn provider_bytes(
 mod archive;
 mod bundle;
 mod container;
+mod file_manifest;
 mod http;
 mod hydrate;
 mod install;
 mod object;
 pub use bundle::{BUNDLE_SCHEMA, export_bundle, import_bundle};
+pub use file_manifest::{FILE_MANIFEST_SCHEMA, FileManifest, ManifestFile, export_file_manifest};
 mod registry_cache;
 mod transaction;
 

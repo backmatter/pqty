@@ -1,0 +1,156 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/backmatter/pqty/main/schemas/pqty.languages.schema.json",
+  "title": "pqty.languages/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "registry",
+    "languages"
+  ],
+  "properties": {
+    "schema": {
+      "const": "pqty.languages/v1"
+    },
+    "registry": {
+      "$ref": "#/$defs/registry"
+    },
+    "languages": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "provider",
+          "declaration"
+        ],
+        "properties": {
+          "provider": {
+            "type": "string",
+            "minLength": 1
+          },
+          "declaration": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "synonyms",
+              "loader",
+              "patterns",
+              "exceptions",
+              "left_hyphen_min",
+              "right_hyphen_min",
+              "attributes"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 255,
+                "pattern": "^[A-Za-z0-9_-]+$"
+              },
+              "synonyms": {
+                "type": "array",
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 255,
+                  "pattern": "^[A-Za-z0-9_-]+$"
+                }
+              },
+              "loader": {
+                "$ref": "#/$defs/virtual_path"
+              },
+              "patterns": {
+                "type": "array",
+                "uniqueItems": true,
+                "maxItems": 100000,
+                "items": {
+                  "$ref": "#/$defs/virtual_path"
+                }
+              },
+              "exceptions": {
+                "type": "array",
+                "uniqueItems": true,
+                "maxItems": 100000,
+                "items": {
+                  "$ref": "#/$defs/virtual_path"
+                }
+              },
+              "left_hyphen_min": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 255
+              },
+              "right_hyphen_min": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 255
+              },
+              "attributes": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "name",
+                    "value"
+                  ],
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "^[A-Za-z0-9_]+$"
+                    },
+                    "value": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "virtual_path": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?![A-Za-z]:)(?!.*\\\\)(?!.*[\\u0000-\\u001F\\u007F])(?!.*(?:^|/)(?:\\.|\\.\\.)(?:/|$))(?!.*//).+$"
+    },
+    "registry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "url",
+        "metadata_digest"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "const": "tlnet"
+        },
+        "url": {
+          "type": "string",
+          "minLength": 1
+        },
+        "snapshot": {
+          "type": "string"
+        },
+        "metadata_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        }
+      }
+    }
+  }
+}

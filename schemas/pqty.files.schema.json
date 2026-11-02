@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/backmatter/pqty/main/schemas/pqty.files.schema.json",
+  "title": "pqty.files/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "fingerprint",
+    "environment_fingerprint",
+    "files"
+  ],
+  "properties": {
+    "schema": {
+      "const": "pqty.files/v1"
+    },
+    "fingerprint": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "environment_fingerprint": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "files": {
+      "type": "array",
+      "maxItems": 1000000,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "tds_path",
+          "owner",
+          "kind",
+          "digest",
+          "size"
+        ],
+        "properties": {
+          "tds_path": {
+            "$ref": "#/$defs/virtual_path"
+          },
+          "owner": {
+            "type": "string",
+            "minLength": 1
+          },
+          "kind": {
+            "$ref": "#/$defs/resource_kind"
+          },
+          "digest": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 134217728
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "virtual_path": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?![A-Za-z]:)(?!.*\\\\)(?!.*[\\u0000-\\u001F\\u007F])(?!.*(?:^|/)(?:\\.|\\.\\.)(?:/|$))(?!.*//).+$"
+    },
+    "resource_kind": {
+      "enum": [
+        "tex",
+        "bibliography",
+        "font-metric",
+        "virtual-font",
+        "type1-font",
+        "open-type-font",
+        "true-type-font",
+        "font-family",
+        "map",
+        "encoding",
+        "hyphenation",
+        "format",
+        "binary",
+        "data"
+      ]
+    }
+  }
+}

@@ -61,6 +61,9 @@ pqty capabilities
 Prints a machine-readable description of the schemas and CLI protocols
 supported by the binary, including the JSON Lines progress protocol.
 
+Use `capabilities --schema pqty.capabilities/v2` to negotiate language
+requirements and verified per-file exports. The default remains v1.
+
 ### `scan`
 
 ```text
@@ -124,6 +127,7 @@ them, and writes an exact lock.
 | --- | --- |
 | `--require-file <TDS_PATH>` | Add a runtime file requirement not visible in the source. May be repeated. |
 | `--require-provider <NAME>` | Add a TeX Live provider requirement. May be repeated. |
+| `--require-language <NAME>` | Add complete explicit `AddHyphen` language inputs. May be repeated. |
 | `--tlpdb-sha256 <DIGEST>` | Require the SHA-256 digest of the decompressed registry metadata. The optional `sha256:` prefix is accepted. |
 | `--store <PATH>` | Override the content-addressed store directory. |
 | `-o`, `--output <PATH>` | Lock output path. The default is `pqty.lock`. |
@@ -173,7 +177,7 @@ without `--output`, stdout remains the same versioned JSON document.
 ### `require`
 
 ```text
-pqty require [--lock <PATH>] (--file <TDS_PATH>|--provider <NAME>)... [OPTIONS]
+pqty require [--lock <PATH>] (--file <TDS_PATH>|--provider <NAME>|--language <NAME>)... [OPTIONS]
 ```
 
 Adds explicit runtime files or providers to an exact lock, hydrates the
@@ -184,13 +188,29 @@ expanded closure, and writes the updated lock.
 | `--lock <PATH>` | Exact lock to extend. The default is `pqty.lock`. |
 | `--file <TDS_PATH>` | Runtime filename or normalized TDS path. May be repeated. |
 | `--provider <NAME>` | TeX Live provider. May be repeated. |
+| `--language <NAME>` | Canonical `AddHyphen` name or synonym. May be repeated. |
 | `--tlpdb <PATH>` | Exact local registry metadata corresponding to the lock. |
 | `--tlpdb-url <URL>` | Exact registry URL corresponding to the lock. |
 | `--store <PATH>` | Override the content-addressed store directory. |
 | `-o`, `--output <PATH>` | Write to another path; otherwise update `--lock`. |
 
-At least one `--file` or `--provider` is required. The selected registry must
+At least one `--file`, `--provider`, or `--language` is required. The selected registry must
 match the snapshot and metadata digest recorded by the lock.
+
+### `languages` and `files`
+
+```sh
+pqty languages --lock pqty.lock --language polish --output languages.json
+pqty --offline files --lock pqty.lock --store .pqty/store --output files.json
+```
+
+`languages` resolves named declarations and exact loader/pattern/exception
+paths. Without a lock, use `--tlpdb` or `--tlpdb-url` to query a registry.
+`files` exports a complete hash and size index after verifying the exact store
+contents. Both print JSON to stdout unless `--output` is supplied; failed
+exports preserve existing output files. See the
+[language and lazy-input contracts](lazy-inputs.md) for all fields, validation,
+offline behavior, and the boundary between packages and engine activation.
 
 ## Runtime-observation commands
 

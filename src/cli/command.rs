@@ -53,7 +53,16 @@ pub(super) fn run(cli: Cli) -> Result<(), PqtyError> {
             let imported = crate::import_bundle(&bundle, &context.config.store_dir(store))?;
             crate::write_lock(&lock, &imported)
         }
-        Command::Capabilities {} => run_capabilities(),
+        Command::Capabilities { schema } => run_capabilities(&schema),
+        Command::Files {
+            lock,
+            store,
+            output,
+        } => publish_json(
+            &crate::export_file_manifest(&read_lock(&lock)?, &context.config.store_dir(store))?,
+            output.as_deref(),
+        ),
+        command @ Command::Languages { .. } => run_languages(&context, command),
         command @ Command::Scan { .. } => run_scan(&context, command),
         command @ Command::Explain { .. } => run_explain(&context, command),
         command @ Command::Tree { .. } => run_tree(&context, command),
@@ -82,10 +91,65 @@ impl ExecutionContext {
     }
 }
 
-fn run_capabilities() -> Result<(), PqtyError> {
-    let capabilities = serde_json::to_value(Capabilities::current())?;
+fn run_capabilities(schema: &str) -> Result<(), PqtyError> {
+    let mut capabilities = serde_json::to_value(Capabilities::current())?;
+    if schema == "pqty.capabilities/v2" {
+        capabilities["schema"] = schema.into();
+        capabilities["languages_schema"] = crate::LANGUAGES_SCHEMA.into();
+        capabilities["file_manifest_schema"] = crate::FILE_MANIFEST_SCHEMA.into();
+        capabilities["language_requirements"] = true.into();
+    }
     println!("{}", serde_json::to_string_pretty(&capabilities)?);
     Ok(())
+}
+
+fn publish_json(value: &impl serde::Serialize, output: Option<&Path>) -> Result<(), PqtyError> {
+    let mut bytes = serde_json::to_vec_pretty(value)?;
+    bytes.push(b'\n');
+    if let Some(output) = output {
+        crate::atomic_write(output, &bytes)
+    } else {
+        use std::io::Write as _;
+        std::io::stdout()
+            .lock()
+            .write_all(&bytes)
+            .map_err(|source| PqtyError::Io {
+                path: "<stdout>".into(),
+                source,
+            })
+    }
+}
+
+fn run_languages(context: &ExecutionContext, command: Command) -> Result<(), PqtyError> {
+    let Command::Languages {
+        lock,
+        languages,
+        tlpdb,
+        tlpdb_url,
+        output,
+    } = command
+    else {
+        unreachable!("languages handler received another command")
+    };
+    let index = if let Some(lock) = lock {
+        load_convergence_index(
+            &read_lock(&lock)?,
+            tlpdb,
+            tlpdb_url,
+            context.offline,
+            context.allow_insecure,
+        )?
+        .0
+    } else {
+        let registry = context.config.registry_request(
+            tlpdb_url,
+            None,
+            context.offline,
+            context.allow_insecure,
+        )?;
+        load_tlpdb_index(tlpdb, registry.as_ref())?
+    };
+    publish_json(&index.resolve_languages(&languages)?, output.as_deref())
 }
 
 fn run_scan(context: &ExecutionContext, command: Command) -> Result<(), PqtyError> {
@@ -215,8 +279,9 @@ fn run_lock(context: &ExecutionContext, command: Command) -> Result<(), PqtyErro
         tlpdb,
         tlpdb_url,
         remote,
-        required_files,
-        required_providers,
+        mut required_files,
+        mut required_providers,
+        required_languages,
         tlpdb_sha256,
         store,
         output,
@@ -233,20 +298,32 @@ fn run_lock(context: &ExecutionContext, command: Command) -> Result<(), PqtyErro
     )?;
     let consumer_requirements =
         normalized_consumer_requirements(&required_files, &required_providers)?;
-    if let Some(lock) = refresh_existing_lock(
-        &scanned,
-        &output,
-        tlpdb.as_deref(),
-        registry.as_ref(),
-        tlpdb_sha256.as_deref(),
-        &consumer_requirements,
-    ) {
+    if required_languages.is_empty()
+        && let Some(lock) = refresh_existing_lock(
+            &scanned,
+            &output,
+            tlpdb.as_deref(),
+            registry.as_ref(),
+            tlpdb_sha256.as_deref(),
+            &consumer_requirements,
+        )
+    {
         return publish_refreshed_lock(&lock, &output);
     }
     let index = load_tlpdb_index(tlpdb, registry.as_ref())?;
     if let Some(expected) = tlpdb_sha256.as_deref() {
         validate_tlpdb_digest(&index, expected)?;
     }
+    let languages = index.resolve_languages(&required_languages)?;
+    required_files.extend(languages.runtime_files());
+    required_providers.extend(
+        languages
+            .languages
+            .into_iter()
+            .map(|language| language.provider),
+    );
+    let consumer_requirements =
+        normalized_consumer_requirements(&required_files, &required_providers)?;
     let source = byte_source(registry.as_ref(), &index)?;
     let store = context.config.store_dir(store);
     if let Some(refreshed) = refresh_local_lock(
@@ -377,8 +454,9 @@ fn run_converge(context: &ExecutionContext, command: Command) -> Result<(), Pqty
 fn run_require(context: &ExecutionContext, command: Command) -> Result<(), PqtyError> {
     let Command::Require {
         lock,
-        files,
-        providers,
+        mut files,
+        mut providers,
+        languages,
         tlpdb,
         tlpdb_url,
         store,
@@ -387,9 +465,9 @@ fn run_require(context: &ExecutionContext, command: Command) -> Result<(), PqtyE
     else {
         unreachable!("require handler received another command");
     };
-    if files.is_empty() && providers.is_empty() {
+    if files.is_empty() && providers.is_empty() && languages.is_empty() {
         return Err(PqtyError::Usage(
-            "`require` needs at least one --file or --provider".to_string(),
+            "`require` needs at least one --file, --provider, or --language".to_string(),
         ));
     }
     let mut locked = read_lock(&lock)?;
@@ -401,6 +479,14 @@ fn run_require(context: &ExecutionContext, command: Command) -> Result<(), PqtyE
         context.allow_insecure,
     )?;
     let source = byte_source(registry.as_ref(), &index)?;
+    let languages = index.resolve_languages(&languages)?;
+    files.extend(languages.runtime_files());
+    providers.extend(
+        languages
+            .languages
+            .into_iter()
+            .map(|language| language.provider),
+    );
     require_runtime(&mut locked, &index, &files, &providers)?;
     hydrate_lock(
         &mut locked,

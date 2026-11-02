@@ -131,13 +131,17 @@ pub(crate) use source::{
 };
 
 mod registry;
-pub use registry::{IndexPackage, PackageRegistry, TlpdbIndex, require_runtime, resolve};
+pub use registry::{
+    HyphenationDeclaration, IndexPackage, LANGUAGES_SCHEMA, LanguageAttribute, LanguageManifest,
+    PackageRegistry, ResolvedLanguage, TlpdbIndex, require_languages, require_runtime, resolve,
+};
 pub(crate) use registry::{locate_tlpdb, normalized_consumer_requirements, resolved_from};
 
 mod store;
 pub use store::{
-    BUNDLE_SCHEMA, MaterializeReport, PackageByteSource, export_bundle, hydrate_lock,
-    import_bundle, install_locked, materialize_from_store,
+    BUNDLE_SCHEMA, FILE_MANIFEST_SCHEMA, FileManifest, ManifestFile, MaterializeReport,
+    PackageByteSource, export_bundle, export_file_manifest, hydrate_lock, import_bundle,
+    install_locked, materialize_from_store,
 };
 #[cfg(test)]
 use store::{BoundedWriter, take_container_runfile};

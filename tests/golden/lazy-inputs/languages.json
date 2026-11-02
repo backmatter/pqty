@@ -1,0 +1,37 @@
+{
+  "schema": "pqty.languages/v1",
+  "registry": {
+    "id": "tlnet",
+    "kind": "tlnet",
+    "url": "https://example.invalid/tlnet",
+    "snapshot": "2026",
+    "metadata_digest": "sha256:f211f883804bf4c6261b64ff0391771d02a68ecd233d45219d604b4be2aa4dd6"
+  },
+  "languages": [
+    {
+      "provider": "hyphen-demo",
+      "declaration": {
+        "name": "demo",
+        "synonyms": [
+          "Demo",
+          "demo-alias"
+        ],
+        "loader": "tex/generic/hyph-demo/loadhyph-demo.tex",
+        "patterns": [
+          "tex/generic/hyph-demo/hyph-demo.pat.txt"
+        ],
+        "exceptions": [
+          "tex/generic/hyph-demo/hyph-demo.hyp.txt"
+        ],
+        "left_hyphen_min": 2,
+        "right_hyphen_min": 3,
+        "attributes": [
+          {
+            "name": "luaspecial",
+            "value": "disabled:example engine restriction"
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -2,6 +2,21 @@
 fn machine_readable_schemas_match_the_rust_protocol_constants() {
     for (text, expected_id, expected_const) in [
         (
+            include_str!("../../schemas/pqty.files.schema.json"),
+            "https://raw.githubusercontent.com/backmatter/pqty/main/schemas/pqty.files.schema.json",
+            crate::FILE_MANIFEST_SCHEMA,
+        ),
+        (
+            include_str!("../../schemas/pqty.languages.schema.json"),
+            "https://raw.githubusercontent.com/backmatter/pqty/main/schemas/pqty.languages.schema.json",
+            crate::LANGUAGES_SCHEMA,
+        ),
+        (
+            include_str!("../../schemas/pqty.capabilities-v2.schema.json"),
+            "https://raw.githubusercontent.com/backmatter/pqty/main/schemas/pqty.capabilities-v2.schema.json",
+            "pqty.capabilities/v2",
+        ),
+        (
             include_str!("../../schemas/pqty.capabilities.schema.json"),
             "https://raw.githubusercontent.com/backmatter/pqty/main/schemas/pqty.capabilities.schema.json",
             "pqty.capabilities/v1",
@@ -50,6 +65,14 @@ fn machine_readable_schemas_match_the_rust_protocol_constants() {
 #[test]
 fn machine_protocol_schemas_are_closed_and_validate_golden_artifacts() {
     let cases = [
+        (
+            include_str!("../../schemas/pqty.files.schema.json"),
+            include_str!("../../tests/golden/lazy-inputs/files.json"),
+        ),
+        (
+            include_str!("../../schemas/pqty.languages.schema.json"),
+            include_str!("../../tests/golden/lazy-inputs/languages.json"),
+        ),
         (
             include_str!("../../schemas/pqty.capabilities.schema.json"),
             include_str!("../../tests/golden/v1/capabilities.json"),

@@ -128,6 +128,14 @@ installs the new tree and renders again. The caller must bound this loop.
 Engine-specific log parsing stays outside the core. `pqty-fls` is the
 reference adapter for kpathsea `.fls` files.
 
+Explicit language requirements lower registry `AddHyphen` declarations to
+existing exact file/provider requirements. The separate `pqty.languages/v1`
+artifact retains snapshot-bound language metadata; `pqty.files/v1` projects
+verified store bytes to a public hash/size index for lazy consumers. Neither
+changes existing v1 lock or environment formats. See the
+[language and lazy-input guide](lazy-inputs.md) for the engine and transport
+boundaries and the opt-in v2 capabilities contract.
+
 ## Code map
 
 | Location | Responsibility |
