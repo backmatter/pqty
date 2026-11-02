@@ -1,13 +1,12 @@
 use crate::store::normalize_runfile;
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::fs;
-use std::io::{self, Read, Write};
+use std::io::{self, Read, Seek, Write};
 use std::path::{Path, PathBuf};
 
 use crate::{
     MAX_ARCHIVE_ENTRY_BYTES, MAX_CONTAINER_EXPANDED_BYTES, MAX_PROVIDER_RUNFILES,
-    MIN_CONTAINER_EXPANDED_BYTES, PqtyError, unique_sibling, validate_tds_path,
+    MIN_CONTAINER_EXPANDED_BYTES, PqtyError, temporary_file, validate_tds_path,
 };
 
 pub(crate) struct BoundedWriter {
@@ -49,7 +48,7 @@ impl Write for BoundedWriter {
 }
 
 struct BoundedFileWriter {
-    file: fs::File,
+    file: tempfile::NamedTempFile,
     written: u64,
     limit: u64,
     description: String,
@@ -104,44 +103,28 @@ pub(super) fn extract_required_container(
             "provider {provider} requests more than {MAX_PROVIDER_RUNFILES} archive entries"
         )));
     }
-    let expanded = unique_sibling(cache_path, "expanded")?;
-    let expansion = (|| -> Result<(), PqtyError> {
-        let file = fs::OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .open(&expanded)
-            .map_err(|source| PqtyError::Io {
-                path: expanded.clone(),
-                source,
-            })?;
-        let mut output = BoundedFileWriter {
-            file,
-            written: 0,
-            limit: expanded_limit,
-            description: provider.to_string(),
-        };
-        lzma_rs::xz_decompress(&mut compressed, &mut output).map_err(|error| {
-            PqtyError::Usage(format!("xz decompress container {provider}: {error:?}"))
-        })?;
-        output.file.sync_all().map_err(|source| PqtyError::Io {
-            path: expanded.clone(),
-            source,
-        })
-    })();
-    if let Err(error) = expansion {
-        let _ = fs::remove_file(&expanded);
-        return Err(error);
-    }
-
-    let extraction = (|| -> Result<(), PqtyError> {
-        let file = fs::File::open(&expanded).map_err(|source| PqtyError::Io {
-            path: expanded.clone(),
+    let mut output = BoundedFileWriter {
+        file: temporary_file(cache_path, "expanded")?,
+        written: 0,
+        limit: expanded_limit,
+        description: provider.to_owned(),
+    };
+    lzma_rs::xz_decompress(&mut compressed, &mut output).map_err(|error| {
+        PqtyError::Usage(format!("xz decompress container {provider}: {error:?}"))
+    })?;
+    output
+        .file
+        .as_file()
+        .sync_all()
+        .map_err(|source| PqtyError::Io {
+            path: output.file.path().to_owned(),
             source,
         })?;
-        visit_required_tar(file, provider, runfiles, visitor)
-    })();
-    let _ = fs::remove_file(&expanded);
-    extraction
+    output.file.rewind().map_err(|source| PqtyError::Io {
+        path: output.file.path().to_owned(),
+        source,
+    })?;
+    visit_required_tar(&mut output.file, provider, runfiles, visitor)
 }
 
 pub(super) fn visit_required_tar(

@@ -13,8 +13,8 @@ use std::time::{Duration, Instant};
 use sha2::{Digest as _, Sha256, Sha512};
 
 use crate::{
-    DEFAULT_TLNET, MAX_CONTAINER_COMPRESSED_BYTES, PqtyError, progress, unique_sibling,
-    validate_provider_identifier,
+    DEFAULT_TLNET, MAX_CONTAINER_COMPRESSED_BYTES, PqtyError, progress, publish_file,
+    temporary_file, validate_provider_identifier,
 };
 
 pub(super) struct ContainerRequest<'a> {
@@ -205,44 +205,24 @@ fn fetch_verified_container(
             "container {provider} response exceeds limit {compressed_limit}"
         )));
     }
-    let temporary = unique_sibling(cache_path, "download")?;
-    let result = (|| {
-        let mut file = fs::File::options()
-            .create_new(true)
-            .write(true)
-            .open(&temporary)
-            .map_err(|source| PqtyError::Io {
-                path: temporary.clone(),
-                source,
-            })?;
-        copy_container(
-            &mut response.into_body().into_reader(),
-            &mut file,
-            provider,
-            expected_sha512,
-            expected_size,
-            true,
-        )?;
-        file.sync_all().map_err(|source| PqtyError::Io {
-            path: temporary.clone(),
-            source,
-        })?;
-        drop(file);
-        fs::rename(&temporary, cache_path).map_err(|source| PqtyError::Io {
-            path: cache_path.to_owned(),
-            source,
-        })?;
-        progress::download_complete(
-            progress::DownloadCategory::Packages,
-            provider,
-            expected_size,
-            Some(expected_size),
-            duration_millis(started.elapsed()),
-        );
-        Ok(())
-    })();
-    let _ = fs::remove_file(&temporary);
-    result
+    let mut file = temporary_file(cache_path, "download")?;
+    copy_container(
+        &mut response.into_body().into_reader(),
+        &mut file,
+        provider,
+        expected_sha512,
+        expected_size,
+        true,
+    )?;
+    publish_file(file, cache_path)?;
+    progress::download_complete(
+        progress::DownloadCategory::Packages,
+        provider,
+        expected_size,
+        Some(expected_size),
+        duration_millis(started.elapsed()),
+    );
+    Ok(())
 }
 
 fn copy_container(

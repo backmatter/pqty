@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Reuse the HTTP agent's connection pool across package and metadata fetches.
+- Retain verified runtime indexes and compact parsed requests only within a
+  hydration operation, rechecking resolution as new providers are added.
+- Own temporary files and bundle staging with `tempfile` so ordinary errors and
+  unwinding clean them up automatically. Keep atomic artifact replacement,
+  competing-writer checks, existing permissions, and persistent recovery data.
+
 - Delegate transfer buffering to standard I/O for package ingestion, download,
   verification, and export. Callers and pqty implementation code no longer tune
   transfer buffer sizes; artifact limits remain enforced.

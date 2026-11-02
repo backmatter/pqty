@@ -1,8 +1,8 @@
 //! Verified per-file access without a TEXMF tree or portable bundle.
 use super::{install::stored_file_digest, object::load_store_manifest, stream::copy_hashed};
 use crate::{
-    LockFile, MAX_ARCHIVE_ENTRY_BYTES, ManifestFile, PqtyError, unique_sibling, usable_parent,
-    validate_materialized_lock, validate_tds_path,
+    LockFile, MAX_ARCHIVE_ENTRY_BYTES, ManifestFile, PqtyError, publish_file, temporary_file,
+    usable_parent, validate_materialized_lock, validate_tds_path,
 };
 use std::{
     fs::{self, File},
@@ -152,30 +152,9 @@ pub fn export_file(
             "file export output must be outside the package store".into(),
         ));
     }
-    let temporary = unique_sibling(output, "file")?;
-    let result = (|| {
-        let mut file = File::options()
-            .create_new(true)
-            .write(true)
-            .open(&temporary)
-            .map_err(|source| PqtyError::Io {
-                path: temporary.clone(),
-                source,
-            })?;
-        // Private output is published only after the streamed digest is checked;
-        // it needs no preliminary content pass.
-        let metadata = copy_file(lock, store, tds_path, &mut file, false)?;
-        file.sync_all().map_err(|source| PqtyError::Io {
-            path: temporary.clone(),
-            source,
-        })?;
-        drop(file);
-        fs::rename(&temporary, output).map_err(|source| PqtyError::Io {
-            path: output.into(),
-            source,
-        })?;
-        Ok(metadata)
-    })();
-    let _ = fs::remove_file(&temporary);
-    result
+    let mut file = temporary_file(output, "file")?;
+    // Private output is published only after its streamed digest is checked.
+    let metadata = copy_file(lock, store, tds_path, &mut file, false)?;
+    publish_file(file, output)?;
+    Ok(metadata)
 }

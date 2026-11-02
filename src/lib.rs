@@ -89,6 +89,9 @@ const MAX_TLPDB_COMPRESSED_BYTES: u64 = 128 * 1024 * 1024;
 const MAX_TLPDB_EXPANDED_BYTES: u64 = 256 * 1024 * 1024;
 static OPERATION_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
+mod temporary;
+pub(crate) use temporary::{publish_file, temporary_directory, temporary_file};
+
 mod error;
 pub use error::PqtyError;
 

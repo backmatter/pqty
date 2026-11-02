@@ -15,7 +15,7 @@ use sha2::{Digest as _, Sha256};
 use crate::{
     LockFile, LockedFile, MAX_CLOSURE_EXPANDED_BYTES, MAX_CLOSURE_RUNFILES,
     MAX_CONTAINER_EXPANDED_BYTES, MAX_PROVIDER_RUNFILES, PackageRegistry, PqtyError,
-    ResolvedPackage, progress, resource_kind, unique_sibling,
+    ResolvedPackage, progress, resource_kind, temporary_file, unique_sibling,
 };
 
 /// Fetch and verify one provider's runfiles into the content-addressable store.
@@ -237,36 +237,20 @@ pub(super) fn write_store_manifest(
     })?;
     let mut bytes = serde_json::to_vec(manifest)?;
     bytes.push(b'\n');
-    let temp = unique_sibling(&path, "manifest")?;
-    let result = (|| -> Result<(), PqtyError> {
-        let mut file = fs::OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .open(&temp)
-            .map_err(|source| PqtyError::Io {
-                path: temp.clone(),
-                source,
-            })?;
-        file.write_all(&bytes).map_err(|source| PqtyError::Io {
-            path: temp.clone(),
-            source,
-        })?;
-        file.sync_all().map_err(|source| PqtyError::Io {
-            path: temp.clone(),
-            source,
-        })?;
-        let won = publish_if_absent(&temp, &path)?;
-        if won {
-            make_read_only(&path)?;
-            Ok(())
-        } else {
-            verify_manifest_winner(&path, expected)
-        }
-    })();
-    if result.is_err() {
-        let _ = fs::remove_file(&temp);
+    let mut file = temporary_file(&path, "manifest")?;
+    file.write_all(&bytes).map_err(|source| PqtyError::Io {
+        path: file.path().to_owned(),
+        source,
+    })?;
+    file.as_file().sync_all().map_err(|source| PqtyError::Io {
+        path: file.path().to_owned(),
+        source,
+    })?;
+    if publish_if_absent(file, &path)? {
+        make_read_only(&path)
+    } else {
+        verify_manifest_winner(&path, expected)
     }
-    result
 }
 
 fn verify_manifest_winner(path: &Path, expected: [u8; 32]) -> Result<(), PqtyError> {
@@ -280,32 +264,29 @@ fn verify_manifest_winner(path: &Path, expected: [u8; 32]) -> Result<(), PqtyErr
     make_read_only(path)
 }
 
-fn publish_if_absent(temp: &Path, destination: &Path) -> Result<bool, PqtyError> {
-    match fs::hard_link(temp, destination) {
-        Ok(()) => {
-            fs::remove_file(temp).map_err(|source| PqtyError::Io {
-                path: temp.to_path_buf(),
+fn publish_if_absent(temp: tempfile::NamedTempFile, destination: &Path) -> Result<bool, PqtyError> {
+    let created = match fs::hard_link(temp.path(), destination) {
+        Ok(()) => true,
+        Err(source) if source.kind() == io::ErrorKind::AlreadyExists => false,
+        Err(source) => {
+            return Err(PqtyError::Io {
+                path: destination.to_owned(),
                 source,
-            })?;
-            if let Some(parent) = destination.parent()
-                && let Ok(directory) = fs::File::open(parent)
-            {
-                let _ = directory.sync_all();
-            }
-            Ok(true)
+            });
         }
-        Err(source) if source.kind() == io::ErrorKind::AlreadyExists => {
-            fs::remove_file(temp).map_err(|source| PqtyError::Io {
-                path: temp.to_path_buf(),
-                source,
-            })?;
-            Ok(false)
-        }
-        Err(source) => Err(PqtyError::Io {
-            path: destination.to_path_buf(),
-            source,
-        }),
+    };
+    let path = temp.path().to_owned();
+    // Remove the temporary link before making the destination read-only;
+    // Windows otherwise also makes the temporary link difficult to delete.
+    temp.close()
+        .map_err(|source| PqtyError::Io { path, source })?;
+    if created
+        && let Some(parent) = destination.parent()
+        && let Ok(directory) = fs::File::open(parent)
+    {
+        let _ = directory.sync_all();
     }
+    Ok(created)
 }
 
 fn make_read_only(path: &Path) -> Result<(), PqtyError> {
@@ -426,67 +407,56 @@ pub(super) fn store_reader(
         path: store_dir.to_owned(),
         source,
     })?;
-    let temp = unique_sibling(&store_dir.join("incoming"), "object")?;
-    let result = (|| {
-        let mut file = fs::OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .open(&temp)
-            .map_err(|source| PqtyError::Io {
-                path: temp.clone(),
-                source,
-            })?;
-        let (digest, size) =
-            super::stream::copy_hashed(reader, &mut file, crate::MAX_ARCHIVE_ENTRY_BYTES, &temp)?;
-        if expected.is_some_and(|expected| expected != digest) {
-            return Err(PqtyError::Usage(
-                "refusing to publish store object with mismatched key".to_owned(),
-            ));
+    let mut file = temporary_file(&store_dir.join("incoming"), "object")?;
+    let (digest, size) = super::stream::copy_hashed(
+        reader,
+        &mut file,
+        crate::MAX_ARCHIVE_ENTRY_BYTES,
+        &store_dir.join("incoming"),
+    )?;
+    if expected.is_some_and(|expected| expected != digest) {
+        return Err(PqtyError::Usage(
+            "refusing to publish store object with mismatched key".into(),
+        ));
+    }
+    let path = store_dir.join(&digest[..2]).join(&digest);
+    if path.exists() {
+        if super::stream::digest_file(&path, crate::MAX_ARCHIVE_ENTRY_BYTES)?.0 == digest {
+            make_read_only(&path)?;
+            return Ok(StoredObject {
+                digest,
+                size,
+                created: false,
+            });
         }
-        let path = store_dir.join(&digest[..2]).join(&digest);
-        if path.exists() {
-            if super::stream::digest_file(&path, crate::MAX_ARCHIVE_ENTRY_BYTES)?.0 == digest {
-                make_read_only(&path)?;
-                return Ok(StoredObject {
-                    digest,
-                    size,
-                    created: false,
-                });
-            }
-            let evidence = quarantine_store_entry(store_dir, &path, "object")?;
-            eprintln!(
-                "pqty: quarantined corrupt store object as {}",
-                evidence.display()
-            );
-        }
-        let parent = path.parent().expect("object path has parent");
-        fs::create_dir_all(parent).map_err(|source| PqtyError::Io {
-            path: parent.to_owned(),
-            source,
-        })?;
-        file.sync_all().map_err(|source| PqtyError::Io {
-            path: temp.clone(),
-            source,
-        })?;
-        drop(file);
-        let created = publish_if_absent(&temp, &path)?;
-        if !created
-            && super::stream::digest_file(&path, crate::MAX_ARCHIVE_ENTRY_BYTES)?.0 != digest
-        {
-            return Err(PqtyError::Usage(format!(
-                "conflicting content-addressed store object {}",
-                path.display()
-            )));
-        }
-        make_read_only(&path)?;
-        Ok(StoredObject {
-            digest,
-            size,
-            created,
-        })
-    })();
-    let _ = fs::remove_file(&temp);
-    result
+        let evidence = quarantine_store_entry(store_dir, &path, "object")?;
+        eprintln!(
+            "pqty: quarantined corrupt store object as {}",
+            evidence.display()
+        );
+    }
+    let parent = path.parent().expect("object path has parent");
+    fs::create_dir_all(parent).map_err(|source| PqtyError::Io {
+        path: parent.to_owned(),
+        source,
+    })?;
+    file.as_file().sync_all().map_err(|source| PqtyError::Io {
+        path: file.path().to_owned(),
+        source,
+    })?;
+    let created = publish_if_absent(file, &path)?;
+    if !created && super::stream::digest_file(&path, crate::MAX_ARCHIVE_ENTRY_BYTES)?.0 != digest {
+        return Err(PqtyError::Usage(format!(
+            "conflicting content-addressed store object {}",
+            path.display()
+        )));
+    }
+    make_read_only(&path)?;
+    Ok(StoredObject {
+        digest,
+        size,
+        created,
+    })
 }
 
 #[cfg(test)]
