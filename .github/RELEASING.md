@@ -1,9 +1,14 @@
 # Releasing pqty
 
-Versions are not bumped automatically, and there are no release pull requests.
-The version stays at its current value in `Cargo.toml` unless the maintainer
-changes it deliberately. To publish, push a matching `vX.Y.Z` tag for a commit
-on `main` manually. The tag workflow then:
+Release-plz maintains a release pull request containing the shared
+`pqty`/`pqty-fls` version, `Cargo.lock`, and changelog. Review and merge that
+pull request with a merge commit; do not squash or rebase it.
+Release entries are generated in that pull request rather than written
+manually.
+
+The merge authorizes release-plz to create the matching `vX.Y.Z` tag and a
+draft GitHub release whose notes come from the changelog. The tag workflow
+then:
 
 1. checks tag and crate version parity;
 2. dry-runs both crate packages;
@@ -12,13 +17,14 @@ on `main` manually. The tag workflow then:
 5. combines the archive digests into one `SHA256SUMS` manifest;
 6. creates build-provenance attestations for the archives and checksum manifest;
 7. uploads the five archives and `SHA256SUMS`; and
-8. creates the GitHub release with generated notes and these assets.
+8. publishes the draft as an immutable GitHub release.
 
 ## Repository configuration
 
 - Store the release GitHub App client ID in the repository variable
-  `RELEASE_APP_CLIENT_ID` and its private key in the repository secret
-  `RELEASE_APP_PRIVATE_KEY`; the texe handoff uses them.
+  `RELEASE_APP_CLIENT_ID`.
+- Store its private key in the repository secret
+  `RELEASE_APP_PRIVATE_KEY`.
 - Create the GitHub environment `crates.io` and use that exact environment in
   both crates.io trusted-publisher records.
 - Enable release immutability in the repository settings. GitHub applies the
@@ -28,8 +34,8 @@ The CI workflow owns formatting, Clippy, tests, documentation, dependency policy
 browser integrity and persistence, and the TeX acceptance corpus. The Release
 workflow's `workflow_dispatch` runs packaging verification without publishing.
 
-Artifact Protocol changes require explicit compatibility review before a
-release tag is pushed. Add a `CHANGELOG.md` entry by hand when it matters.
+Artifact Protocol changes require explicit compatibility review before the
+release pull request is merged.
 
 After publication, verify the release and a downloaded archive with:
 
