@@ -30,9 +30,9 @@ then:
 - Enable release immutability in the repository settings. GitHub applies the
   setting only to releases published after it is enabled.
 
-The `main` CI workflow owns formatting, Clippy, tests, documentation,
-dependency policy, and the TeX acceptance corpus. `workflow_dispatch` runs
-packaging verification without publishing.
+The CI workflow owns formatting, Clippy, tests, documentation, dependency policy,
+browser integrity and persistence, and the TeX acceptance corpus. The Release
+workflow's `workflow_dispatch` runs packaging verification without publishing.
 
 Artifact Protocol changes require explicit compatibility review before the
 release pull request is merged.

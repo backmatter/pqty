@@ -27,6 +27,20 @@ RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked
 cargo deny check
 ```
 
+The CI browser job also verifies streaming integrity, OPFS persistence across a
+Chromium restart, offline reuse, and corrupt or truncated input rejection. Run
+the same self-contained fixture locally with Node 24:
+
+```sh
+npm ci --ignore-scripts --no-audit --no-fund
+npx --no-install playwright install --with-deps --only-shell chromium
+cargo build --locked --bin pqty
+npm run test:browser
+```
+
+The root npm package is private verification tooling; it is not a runtime
+dependency of the Rust CLI or the standalone browser adapter.
+
 When TeX Live is available, also run:
 
 ```sh
