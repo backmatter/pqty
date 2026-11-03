@@ -473,7 +473,7 @@ fn environment_export_is_atomic_and_matches_stdout() {
             .arg("--output")
             .arg(&destination),
     );
-    assert!(output.stdout.is_empty());
+    assert!(output.stdout.is_empty(), "{:?}", output.stdout);
     assert_eq!(fs::read(&destination).expect("export"), stdout);
 
     let invalid_lock = root.join("invalid.lock");
@@ -487,7 +487,7 @@ fn environment_export_is_atomic_and_matches_stdout() {
         .output()
         .expect("run pqty");
     assert!(!failure.status.success());
-    assert!(failure.stdout.is_empty());
+    assert!(failure.stdout.is_empty(), "{:?}", failure.stdout);
     assert_eq!(fs::read(&destination).expect("previous export"), stdout);
 
     let output_directory = root.join("output-directory");
@@ -738,7 +738,7 @@ fn typed_maps_and_single_file_exports_have_negotiated_offline_cli_contracts() {
         "export.map",
     ]);
     let output = run_ok(&mut file);
-    assert!(output.stdout.is_empty());
+    assert!(output.stdout.is_empty(), "{:?}", output.stdout);
     assert_eq!(fs::read(root.join("export.map")).unwrap(), b"% fixture\n");
     // File delivery needs neither upstream metadata nor the original source tree.
     fs::write(&tlpdb, metadata.replace("revision 1", "revision 9")).unwrap();
@@ -794,7 +794,7 @@ fn standalone_package_commands_need_no_project_and_export_only_one_file() {
         "--output",
         "public.sty",
     ]));
-    assert!(output.stdout.is_empty());
+    assert!(output.stdout.is_empty(), "{:?}", output.stdout);
     assert_eq!(fs::read(root.join("public.sty")).unwrap(), b"% foo");
     for version in ["v2", "v3"] {
         let result = pqty(&root)

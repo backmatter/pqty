@@ -41,12 +41,13 @@ fn data_closures_follow_contents_across_categories_and_exclude_installers_and_bi
     ] {
         assert_eq!(index.providers_of_file(file), [provider]);
     }
+    let private = index.providers_of_path("tlpkg/private/module.lua");
+    assert!(private.is_empty(), "{private:?}");
     assert!(
-        index
-            .providers_of_path("tlpkg/private/module.lua")
-            .is_empty()
+        index.providers_of_file("example.tex").is_empty(),
+        "{:?}",
+        index.providers_of_file("example.tex")
     );
-    assert!(index.providers_of_file("example.tex").is_empty());
     let mixed = METADATA.replace(
         " RELOC/tex/latex/alpha/alpha.sty",
         " RELOC/tex/latex/alpha/alpha.sty\n tlpkg/private/module.lua",
@@ -247,7 +248,11 @@ fn reserved_distribution_metadata_does_not_claim_runtime_package_files() {
     );
     let index = TlpdbIndex::parse(&metadata, Path::new("tlpkg/texlive.tlpdb"));
     assert_eq!(index.providers_of_file("alpha.sty"), ["alpha"]);
-    assert!(index.providers_of_file("generated.map").is_empty());
+    assert!(
+        index.providers_of_file("generated.map").is_empty(),
+        "{:?}",
+        index.providers_of_file("generated.map")
+    );
     assert!(
         index.package("00texlive.image").is_some(),
         "source metadata remains available"

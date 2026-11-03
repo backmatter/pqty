@@ -501,7 +501,7 @@ mod tests {
         assert!(!root.path().join("texmf").exists());
         let mut sink = Vec::new();
         assert!(copy_package_file(&cached, &store, "../demo.sty", &mut sink).is_err());
-        assert!(sink.is_empty());
+        assert!(sink.is_empty(), "{sink:?}");
         let mut wrong_snapshot = registry(&bytes, "https://other.invalid/snapshot");
         wrong_snapshot.snapshot_override = Some("2026-07-27".into());
         assert!(cached.validate_against(&wrong_snapshot).is_err());
@@ -538,7 +538,7 @@ mod tests {
         altered.fingerprint = altered.compute_fingerprint().unwrap();
         let mut raw = Vec::new();
         assert!(copy_package_file(&altered, &store, &altered.files[0].tds_path, &mut raw).is_err());
-        assert!(raw.is_empty());
+        assert!(raw.is_empty(), "{raw:?}");
         let output = root.path().join("published.sty");
         fs::write(&output, b"previous output").unwrap();
         let digest = package.files[0].digest.strip_prefix("sha256:").unwrap();
@@ -549,7 +549,7 @@ mod tests {
         );
         assert_eq!(fs::read(&output).unwrap(), b"previous output");
         assert!(copy_package_file(&package, &store, &package.files[0].tds_path, &mut raw).is_err());
-        assert!(raw.is_empty());
+        assert!(raw.is_empty(), "{raw:?}");
         crate::tests::make_test_tree_writable(root.path());
     }
 

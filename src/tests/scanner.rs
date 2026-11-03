@@ -117,7 +117,11 @@ fn argument_scan_stops_at_blank_line() {
     // A blank line between command and brace means no argument is taken.
     let commands = scan_commands("\\usepackage\n\n{toolate}");
     assert_eq!(commands.len(), 1);
-    assert!(commands[0].1.required.is_empty());
+    assert!(
+        commands[0].1.required.is_empty(),
+        "{:?}",
+        commands[0].1.required
+    );
 }
 use std::fs;
 

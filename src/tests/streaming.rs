@@ -39,7 +39,7 @@ fn file_export_is_offline_exact_and_atomic_on_corruption_and_missing_paths() {
     fs::write(&object, b"corrupt").unwrap();
     let mut stream = Vec::new();
     assert!(copy_verified_file(&lock, &store, &wanted.tds_path, &mut stream).is_err());
-    assert!(stream.is_empty());
+    assert!(stream.is_empty(), "{stream:?}");
     assert!(export_file(&lock, &store, &wanted.tds_path, &output).is_err());
     assert_eq!(fs::read(&output).unwrap(), bytes);
     assert!(!fs::read_dir(&root).unwrap().any(|entry| {

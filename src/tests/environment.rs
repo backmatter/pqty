@@ -249,7 +249,11 @@ fn trace_convergence_adds_and_hydrates_a_deterministic_provider_closure() {
     )
     .unwrap();
     assert_eq!(stable_report.status, ConvergenceStatus::Stable);
-    assert!(stable_report.added_providers.is_empty());
+    assert!(
+        stable_report.added_providers.is_empty(),
+        "{:?}",
+        stable_report.added_providers
+    );
     assert_eq!(
         stable_report.environment_fingerprint,
         report.environment_fingerprint
@@ -390,7 +394,11 @@ fn unresolved_trace_convergence_does_not_partially_change_the_lock() {
     )
     .unwrap();
     assert_eq!(report.status, ConvergenceStatus::Unresolved);
-    assert!(report.added_providers.is_empty());
+    assert!(
+        report.added_providers.is_empty(),
+        "{:?}",
+        report.added_providers
+    );
     assert_eq!(report.unresolved.len(), 1);
     assert_eq!(
         report.unresolved[0].reason,

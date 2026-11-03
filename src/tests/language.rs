@@ -183,7 +183,11 @@ fn add_hyphen_parser_checks_metadata_and_retains_optional_and_quoted_fields() {
     )
     .unwrap();
     let manifest = index.resolve_languages(&["demo".into()]).unwrap();
-    assert!(manifest.languages[0].declaration.synonyms.is_empty());
+    assert!(
+        manifest.languages[0].declaration.synonyms.is_empty(),
+        "{:?}",
+        manifest.languages[0].declaration.synonyms
+    );
     assert_eq!(
         manifest.runtime_files(),
         ["tex/generic/hyph-demo/loadhyph-demo.tex"]
