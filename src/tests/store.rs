@@ -32,6 +32,167 @@ fn raw_bundle_extensions_are_rejected_before_reading_their_declared_bodies() {
     }
 }
 
+enum BundleEntry<'a> {
+    File(String, &'a [u8]),
+    Link(tar::EntryType, String),
+    /// A header whose declared body is never written.
+    Declared(String, u64),
+}
+
+/// Write a gzip tar bundle with an arbitrary metadata document and entries.
+fn write_crafted_bundle(path: &Path, metadata: &serde_json::Value, entries: &[BundleEntry<'_>]) {
+    use std::io::Write as _;
+    fn header(path: &str, kind: tar::EntryType, size: u64) -> tar::Header {
+        let mut header = tar::Header::new_gnu();
+        header.set_path(path).unwrap();
+        header.set_entry_type(kind);
+        header.set_mode(0o600);
+        header.set_size(size);
+        header
+    }
+    fn pad(bytes: &mut Vec<u8>) {
+        bytes.resize(bytes.len().div_ceil(512) * 512, 0);
+    }
+    let mut tar = Vec::new();
+    let metadata = serde_json::to_vec(metadata).unwrap();
+    let mut first = header(
+        "bundle.json",
+        tar::EntryType::Regular,
+        metadata.len() as u64,
+    );
+    first.set_cksum();
+    tar.extend_from_slice(first.as_bytes());
+    tar.extend_from_slice(&metadata);
+    pad(&mut tar);
+    for entry in entries {
+        match entry {
+            BundleEntry::File(path, bytes) => {
+                let mut entry = header(path, tar::EntryType::Regular, bytes.len() as u64);
+                entry.set_cksum();
+                tar.extend_from_slice(entry.as_bytes());
+                tar.extend_from_slice(bytes);
+                pad(&mut tar);
+            }
+            BundleEntry::Link(kind, path) => {
+                let mut entry = header(path, *kind, 0);
+                entry.set_link_name("../../outside").unwrap();
+                entry.set_cksum();
+                tar.extend_from_slice(entry.as_bytes());
+            }
+            BundleEntry::Declared(path, size) => {
+                let mut entry = header(path, tar::EntryType::Regular, *size);
+                entry.set_cksum();
+                tar.extend_from_slice(entry.as_bytes());
+            }
+        }
+    }
+    tar.extend_from_slice(&[0; 1024]);
+    let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+    encoder.write_all(&tar).unwrap();
+    fs::write(path, encoder.finish().unwrap()).unwrap();
+}
+
+#[test]
+fn invalid_bundles_are_rejected_before_publication() {
+    let root = temporary_test_root("bundle-negative");
+    let bytes = b"locked package bytes";
+    let lock = single_file_store(&root.join("source-store"), bytes);
+    let digest = hex::encode(Sha256::digest(bytes));
+    let object = format!("objects/{digest}");
+    let other = hex::encode(Sha256::digest(b"other bytes"));
+    let manifest = |file_digest: &str| {
+        serde_json::json!({
+            "schema": "pqty.bundle/v1",
+            "lock": lock,
+            "manifests": {"foo": {
+                "schema": "pqty.store-package/v1",
+                "files": [{"tds_path": "tex/latex/foo/foo.sty", "digest": format!("sha256:{file_digest}")}]
+            }}
+        })
+    };
+    let valid = manifest(&digest);
+    let cases: Vec<(&str, serde_json::Value, Vec<BundleEntry<'_>>, &str)> = vec![
+        (
+            "tampered object",
+            valid.clone(),
+            vec![BundleEntry::File(object.clone(), b"tampered package byte")],
+            "content checksum mismatch",
+        ),
+        (
+            "unlisted object",
+            valid.clone(),
+            vec![
+                BundleEntry::File(object.clone(), bytes),
+                BundleEntry::File(format!("objects/{other}"), b"other bytes"),
+            ],
+            "Unlisted package bundle object",
+        ),
+        (
+            "unlisted path",
+            valid.clone(),
+            vec![BundleEntry::File("README".to_owned(), b"extra")],
+            "Unlisted package bundle object",
+        ),
+        (
+            "duplicate object",
+            valid.clone(),
+            vec![
+                BundleEntry::File(object.clone(), bytes),
+                BundleEntry::File(object.clone(), bytes),
+            ],
+            "Invalid package bundle object entry",
+        ),
+        (
+            "symlink object",
+            valid.clone(),
+            vec![BundleEntry::Link(tar::EntryType::Symlink, object.clone())],
+            "Invalid package bundle object entry",
+        ),
+        (
+            "hardlink object",
+            valid.clone(),
+            vec![BundleEntry::Link(tar::EntryType::Link, object.clone())],
+            "Invalid package bundle object entry",
+        ),
+        (
+            "oversized object",
+            valid.clone(),
+            vec![BundleEntry::Declared(
+                object.clone(),
+                crate::MAX_ARCHIVE_ENTRY_BYTES + 1,
+            )],
+            "Invalid package bundle object entry",
+        ),
+        (
+            "manifest differs from lock",
+            manifest(&other),
+            vec![BundleEntry::File(
+                format!("objects/{other}"),
+                b"other bytes",
+            )],
+            "provider integrity differs from its lock",
+        ),
+    ];
+    for (name, metadata, entries, expected) in cases {
+        let path = root.join("crafted.tar.gz");
+        write_crafted_bundle(&path, &metadata, &entries);
+        let store = root.join("store");
+        let error = crate::import_bundle(&path, &store).expect_err(name);
+        assert!(error.to_string().contains(expected), "{name}: {error}");
+        assert_eq!(
+            fs::read_dir(&store).unwrap().count(),
+            0,
+            "{name}: nothing may be published"
+        );
+    }
+    // The same crafted layout with the real bytes is accepted.
+    let path = root.join("crafted.tar.gz");
+    write_crafted_bundle(&path, &valid, &[BundleEntry::File(object, bytes)]);
+    crate::import_bundle(&path, &root.join("store")).unwrap();
+    make_test_tree_writable(&root);
+    fs::remove_dir_all(root).unwrap();
+}
+
 #[test]
 #[allow(clippy::too_many_lines)]
 fn materialized_tree_replacement_is_transactional() {
@@ -40,82 +201,9 @@ fn materialized_tree_replacement_is_transactional() {
     let out = root.join("texmf");
 
     let bytes = b"locked package bytes";
+    let lock = single_file_store(&store, bytes);
     let digest = hex::encode(Sha256::digest(bytes));
     let store_object = store.join(&digest[..2]).join(&digest);
-    fs::create_dir_all(store_object.parent().unwrap()).unwrap();
-    fs::write(&store_object, bytes).unwrap();
-    let files = vec![LockedFile {
-        tds_path: "tex/latex/foo/foo.sty".to_string(),
-        kind: ResourceKind::Tex,
-    }];
-    let package_digest = hex::encode(Sha256::digest(
-        format!("tex/latex/foo/foo.sty:{digest}\n").as_bytes(),
-    ));
-    let integrity = format!(
-        "sha256-{}",
-        BASE64.encode(hex::decode(&package_digest).unwrap())
-    );
-    let manifests = store.join("manifests");
-    fs::create_dir_all(&manifests).unwrap();
-    fs::write(
-        manifests.join(format!("{package_digest}.json")),
-        serde_json::to_vec(&serde_json::json!({
-            "schema": "pqty.store-package/v1",
-            "files": [{
-                "tds_path": "tex/latex/foo/foo.sty",
-                "digest": format!("sha256:{digest}")
-            }]
-        }))
-        .unwrap(),
-    )
-    .unwrap();
-    let lock = LockFile {
-        schema: LOCK_SCHEMA.to_string(),
-        stage: LockStage::Exact,
-        generated_with: "test".to_string(),
-        environment: Environment::default(),
-        registries: vec![Registry {
-            id: "test".to_string(),
-            kind: RegistryKind::Tlnet,
-            url: "https://example.invalid/tlnet".to_string(),
-            snapshot: Some("test".to_string()),
-            metadata_digest: Some(format!("sha256:{}", "11".repeat(32))),
-        }],
-        consumer_requirements: ConsumerRequirements::default(),
-        root: "main.tex".to_string(),
-        sources: vec![SourceRecord {
-            path: "main.tex".to_string(),
-            digest: format!("sha256:{}", "22".repeat(32)),
-        }],
-        document_class: None,
-        loaded_classes: Vec::new(),
-        packages: Vec::new(),
-        inputs: Vec::new(),
-        bibliographies: Vec::new(),
-        graphics: Vec::new(),
-        closure: vec![ResolvedPackage {
-            provider: "foo".to_string(),
-            version: "tlrev:1".to_string(),
-            source: PackageSource {
-                registry: Some("test".to_string()),
-                kind: PackageSourceKind::Registry,
-                locator: "foo".to_string(),
-                container_checksum: None,
-                container_size: None,
-            },
-            satisfies: Vec::new(),
-            integrity: Some(integrity),
-            dependencies: Vec::new(),
-            direct: true,
-            requested_by: Vec::new(),
-            store_key: Some(format!("sha256:{package_digest}")),
-            engines: Vec::new(),
-            font_maps: Vec::new(),
-            runtime_requests: Vec::new(),
-            files,
-        }],
-        unresolved: Vec::new(),
-    };
 
     assert_materialization_destination_safety(&root, &store, &lock);
 
@@ -174,6 +262,86 @@ fn materialized_tree_replacement_is_transactional() {
     assert!(fs::metadata(&installed).unwrap().permissions().readonly());
     make_test_tree_writable(&root);
     let _ = fs::remove_dir_all(root);
+}
+
+/// Store one provider with one file and return its exact lock.
+fn single_file_store(store: &Path, bytes: &[u8]) -> LockFile {
+    let digest = hex::encode(Sha256::digest(bytes));
+    let store_object = store.join(&digest[..2]).join(&digest);
+    fs::create_dir_all(store_object.parent().unwrap()).unwrap();
+    fs::write(&store_object, bytes).unwrap();
+    let files = vec![LockedFile {
+        tds_path: "tex/latex/foo/foo.sty".to_string(),
+        kind: ResourceKind::Tex,
+    }];
+    let package_digest = hex::encode(Sha256::digest(
+        format!("tex/latex/foo/foo.sty:{digest}\n").as_bytes(),
+    ));
+    let integrity = format!(
+        "sha256-{}",
+        BASE64.encode(hex::decode(&package_digest).unwrap())
+    );
+    let manifests = store.join("manifests");
+    fs::create_dir_all(&manifests).unwrap();
+    fs::write(
+        manifests.join(format!("{package_digest}.json")),
+        serde_json::to_vec(&serde_json::json!({
+            "schema": "pqty.store-package/v1",
+            "files": [{
+                "tds_path": "tex/latex/foo/foo.sty",
+                "digest": format!("sha256:{digest}")
+            }]
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    LockFile {
+        schema: LOCK_SCHEMA.to_string(),
+        stage: LockStage::Exact,
+        generated_with: "test".to_string(),
+        environment: Environment::default(),
+        registries: vec![Registry {
+            id: "test".to_string(),
+            kind: RegistryKind::Tlnet,
+            url: "https://example.invalid/tlnet".to_string(),
+            snapshot: Some("test".to_string()),
+            metadata_digest: Some(format!("sha256:{}", "11".repeat(32))),
+        }],
+        consumer_requirements: ConsumerRequirements::default(),
+        root: "main.tex".to_string(),
+        sources: vec![SourceRecord {
+            path: "main.tex".to_string(),
+            digest: format!("sha256:{}", "22".repeat(32)),
+        }],
+        document_class: None,
+        loaded_classes: Vec::new(),
+        packages: Vec::new(),
+        inputs: Vec::new(),
+        bibliographies: Vec::new(),
+        graphics: Vec::new(),
+        closure: vec![ResolvedPackage {
+            provider: "foo".to_string(),
+            version: "tlrev:1".to_string(),
+            source: PackageSource {
+                registry: Some("test".to_string()),
+                kind: PackageSourceKind::Registry,
+                locator: "foo".to_string(),
+                container_checksum: None,
+                container_size: None,
+            },
+            satisfies: Vec::new(),
+            integrity: Some(integrity),
+            dependencies: Vec::new(),
+            direct: true,
+            requested_by: Vec::new(),
+            store_key: Some(format!("sha256:{package_digest}")),
+            engines: Vec::new(),
+            font_maps: Vec::new(),
+            runtime_requests: Vec::new(),
+            files,
+        }],
+        unresolved: Vec::new(),
+    }
 }
 
 fn assert_environment_reuse_and_recovery(

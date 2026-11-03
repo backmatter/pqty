@@ -5,8 +5,8 @@ use super::object::{
     store_reader, write_store_manifest,
 };
 use crate::{
-    LockFile, PqtyError, publish_file, temporary_directory, temporary_file,
-    validate_materialized_lock,
+    LockFile, MAX_ARCHIVE_ENTRY_BYTES, PqtyError, publish_file, temporary_directory,
+    temporary_file, validate_materialized_lock,
 };
 use flate2::{Compression, bufread::GzDecoder, write::GzEncoder};
 use serde::{Deserialize, Serialize};
@@ -20,7 +20,6 @@ use std::{
 /// Schema identifying a portable, verified package bundle.
 pub const BUNDLE_SCHEMA: &str = "pqty.bundle/v1";
 const MAX_TOTAL: u64 = 2 * 1024 * 1024 * 1024;
-const MAX_FILE: u64 = 128 * 1024 * 1024;
 const MAX_HEADER: u64 = 64 * 1024 * 1024;
 
 #[derive(Serialize, Deserialize)]
@@ -55,7 +54,7 @@ fn append<W: Write, R: Read>(
         .map_err(|e| invalid(format!("Could not write package bundle: {e}")))
 }
 fn digest_file(path: &Path) -> Result<String, PqtyError> {
-    Ok(super::stream::digest_file(path, MAX_FILE)?.0)
+    Ok(super::stream::digest_file(path, MAX_ARCHIVE_ENTRY_BYTES)?.0)
 }
 
 fn validate(bundle: &Bundle) -> Result<BTreeSet<String>, PqtyError> {
@@ -196,7 +195,7 @@ pub fn import_bundle(input: &Path, store: &Path) -> Result<LockFile, PqtyError> 
             .to_owned();
         if !entry.header().entry_type().is_file()
             || !seen.insert(digest.clone())
-            || entry.size() > MAX_FILE
+            || entry.size() > MAX_ARCHIVE_ENTRY_BYTES
         {
             return Err(invalid("Invalid package bundle object entry"));
         }
