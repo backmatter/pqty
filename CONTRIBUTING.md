@@ -29,17 +29,20 @@ cargo deny check
 
 The CI browser job also verifies streaming integrity, OPFS persistence across a
 Chromium restart, offline reuse, and corrupt or truncated input rejection. Run
-the same self-contained fixture locally with Node 24:
+the same self-contained fixture locally with [Vite+](https://viteplus.dev/)
+(`vp`), which runs Node 26 and pnpm:
 
 ```sh
-npm ci --ignore-scripts --no-audit --no-fund
-npx --no-install playwright install --with-deps --only-shell chromium
+vp install
+vp run check
+vp exec -- playwright install --with-deps --only-shell chromium
 cargo build --locked --bin pqty
-npm run test:browser
+vp run test:browser
 ```
 
-The root npm package is private verification tooling; it is not a runtime
-dependency of the Rust CLI or the standalone browser adapter.
+`vp run check` formats and lints the browser adapter. The root package is
+private verification tooling; it is not a runtime dependency of the Rust CLI or
+the standalone browser adapter.
 
 When TeX Live is available, also run:
 
@@ -104,13 +107,3 @@ binaries rather than replacing an existing tag.
 
 By contributing, you agree that your contribution is licensed under the
 repository's MIT license.
-
-## Reuse CI for release metadata
-
-Code changes run the full platform checks on the pull request. Merging does not
-repeat those checks on `main`. A version-only release PR can reuse the successful
-source check when its base has exactly the same tree as the checked, merged PR.
-The scope job checks parsed manifests and lockfiles. Source changes, dependency
-changes, incomplete checks, or unavailable proof require the full matrix.
-The reused run is linked in the workflow summary. Ordinary manual CI runs always run the full checks. The synchronized tex-ls
-release request can reuse a verified source check. Run `python3 scripts/test_ci_scope.py` when changing this guard.

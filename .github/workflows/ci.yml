@@ -17,32 +17,7 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  scope:
-    name: Validation scope
-    if: github.event_name != 'pull_request' || (!github.event.pull_request.draft && github.event.action != 'edited')
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      actions: read
-      pull-requests: read
-    outputs:
-      full: ${{ steps.scope.outputs.full }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - name: Check validation reuse boundaries
-        run: python3 scripts/test_ci_scope.py
-      - name: Verify whether the source already passed all platform checks
-        id: scope
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: python3 scripts/ci-scope.py ci.yml
-
   rust:
-    needs: scope
-    if: needs.scope.outputs.full == 'true'
     name: Rust (${{ matrix.os }})
     strategy:
       fail-fast: false
@@ -78,10 +53,8 @@ jobs:
         run: cargo doc --workspace --no-deps --locked
 
   browser:
-    needs: scope
-    if: needs.scope.outputs.full == 'true'
     name: Browser package integrity and persistence
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 15
 
     steps:
@@ -89,23 +62,23 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Set up Node
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+      - name: Set up Vite+ with Node 26
+        uses: voidzero-dev/setup-vp@6a033122543ee100d01838245fe74a26a038da6d # v1.21.2
         with:
-          node-version: "24"
-          cache: npm
+          node-version: "26"
+          cache: true
       - name: Install locked browser-check dependencies
-        run: npm ci --ignore-scripts --no-audit --no-fund
+        run: vp install --frozen-lockfile
+      - name: Check adapter formatting and lint
+        run: vp run check
       - name: Install headless Chromium
-        run: npx --no-install playwright install --with-deps --only-shell chromium
+        run: vp exec -- playwright install --with-deps --only-shell chromium
       - name: Build native fixture CLI
-        run: cargo build --locked --bin pqty --jobs 1
+        run: cargo build --locked --bin pqty
       - name: Verify streamed files, integrity and persistent offline reuse
-        run: npm run test:browser
+        run: vp run test:browser
 
   tex-acceptance:
-    needs: scope
-    if: needs.scope.outputs.full == 'true'
     name: TeX acceptance (Linux)
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -208,26 +181,17 @@ jobs:
           path: target/corpus-metrics.json
 
   dependency-policy:
-    needs: scope
-    if: ${{ always() && needs.scope.result != 'skipped' }}
     name: Dependency security, licenses, and sources
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
     steps:
-      - name: Require a valid validation decision
-        shell: bash
-        env:
-          SCOPE_RESULT: ${{ needs.scope.result }}
-        run: test "$SCOPE_RESULT" = success
       - name: Check out repository
-        if: needs.scope.outputs.full == 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Check dependency policy
-        if: needs.scope.outputs.full == 'true'
         uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
         with:
-          rust-version: "1.89.0"
+          rust-version: "1.99.1"

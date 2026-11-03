@@ -1,11 +1,18 @@
 {
   "name": "pqty-checks",
   "private": true,
+  "type": "module",
   "scripts": {
+    "check": "vp check adapters/browser",
     "test:browser": "node scripts/check-browser-files.mjs"
   },
   "devDependencies": {
-    "@noble/hashes": "2.2.0",
-    "playwright": "1.58.2"
-  }
+    "@noble/hashes": "2.4.0",
+    "playwright": "1.64.1",
+    "vite-plus": "catalog:"
+  },
+  "engines": {
+    "node": ">=26"
+  },
+  "packageManager": "pnpm@12.16.1"
 }
