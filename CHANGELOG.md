@@ -11,7 +11,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Exclude reserved TeX Live distribution metadata from package-file ownership;
   source-image and generated-file records have no installable containers.
-
 - Consolidate all capabilities into `pqty.capabilities/v1`; remove intermediate
   v2/v3 selectors. Consumers must accept the documented v1 capability fields.
 
@@ -19,7 +18,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Add standalone serial `mirror` publication of all runtime providers, with
   verified resumable public objects and a completion catalog published last.
-
 - Prepare and cache standalone `pqty.package/v1` manifests without project
   sources or TEXMF installations. Resolve unique filenames and export verified
   individual files for immutable hosting.
@@ -38,11 +36,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Own temporary files and bundle staging with `tempfile` so ordinary errors and
   unwinding clean them up automatically. Keep atomic artifact replacement,
   competing-writer checks, existing permissions, and persistent recovery data.
-
 - Delegate transfer buffering to standard I/O for package ingestion, download,
   verification, and export. Callers and pqty implementation code no longer tune
   transfer buffer sizes; artifact limits remain enforced.
-
 - Preserve declared TEXMF data dependencies across `Package`, `TLCore`, and
   `ConTeXt` categories, including script and configuration data. Keep platform
   binaries and distribution-root installer helpers outside file ownership lookup.
@@ -61,9 +57,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and atomic `export_file`, without a TEXMF tree or private store paths.
 - Preserve typed Map/MixedMap/KanjiMap declarations and profile templates in
   `pqty.font-maps/v1`, exposed by `font-maps` and `font_map_manifest`.
-  Opt-in capabilities v3 advertises the new interfaces; v1 and v2 are unchanged.
-  The Rust API adds `IndexPackage.font_map_declarations`.
-
+  The Rust API adds the required `IndexPackage.font_map_declarations` field.
 - Resolve explicit language names and aliases from TeX Live `AddHyphen`
   declarations, retaining loaders, patterns, exceptions, minima, and attributes.
   `lock --require-language`, `require --language`, and `languages` use exact
@@ -71,19 +65,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Export verified per-file hashes and sizes with `files` and
   `export_file_manifest`, without materializing another TEXMF tree or exposing
   private store paths. Add closed `pqty.files/v1` and `pqty.languages/v1` schemas.
-- Opt-in `capabilities --schema pqty.capabilities/v2` negotiation for these
-  contracts; the default capabilities output and existing v1 artifacts remain
-  compatible. The Rust API adds `IndexPackage.hyphenation`.
-
-
-### Compatibility
-
-- Rust callers constructing `IndexPackage` must provide the new
-  `hyphenation` and `font_map_declarations` fields. This pre-1.0 patch release
-  intentionally includes those Rust API changes; it is not source-compatible
-  with every 0.1.2 Rust integration.
-- Existing CLI defaults and v1 artifact formats remain compatible. Capability
-  schemas v2 and v3 are opt-in.
+  The Rust API adds the required `IndexPackage.hyphenation` field.
+- Advertise these interfaces through capabilities; 0.1.4 folded the interim
+  capability selectors into `pqty.capabilities/v1`.
 
 ### Other
 

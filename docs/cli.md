@@ -258,6 +258,25 @@ atomically replaced after verification; stdout is empty. Basename guessing,
 network recovery, registry lookup, and TEXMF installation are not performed.
 Outputs inside the store are rejected. A failed export preserves existing output.
 
+### `bundle` and `import`
+
+```sh
+pqty bundle --lock pqty.lock --output packages.tar.gz
+pqty import --bundle packages.tar.gz --lock pqty.lock
+```
+
+`bundle` writes an exact lock and its verified store objects to one gzip tar
+archive, replaced atomically. `import` validates the whole archive before it
+publishes objects and package manifests into the store (`--store` or the
+configured cache), then **replaces the `--lock` file** with the lock carried
+by the bundle. An existing lock at that path is not compared or merged.
+
+A bundle is not signed. `import` only checks it against itself: every object
+must match its listed digest and every package manifest must match the bundle's
+own lock. This catches damage and malformed archives, not a substituted bundle.
+Import bundles only from sources you trust, or compare the imported lock with
+one you already trust.
+
 ### `font-maps`
 
 ```sh
