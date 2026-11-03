@@ -52,9 +52,9 @@ self.onmessage=async ({data})=>{try{
  if(action!=='read'){
   const directory=await (await navigator.storage.getDirectory()).getDirectoryHandle('pqty.package-files.v1',{create:true});
   const name=identity.digest.slice(7);
-  if(action==='remove')await directory.removeEntry(name);
+  if(action==='remove')await directory.removeEntry(name).catch(error=>{if(error.name!=='NotFoundError')throw error;});
   else if(action==='corrupt'){const output=await (await directory.getFileHandle(name)).createWritable();await output.write('corrupt cached bytes');await output.close();}
-  else if(action==='size'){postMessage({id,value:(await (await directory.getFileHandle(name)).getFile()).size});return;}
+  else if(action==='exists'){postMessage({id,value:await directory.getFileHandle(name).then(()=>true,error=>{if(error.name==='NotFoundError')return false;throw error;})});return;}
   postMessage({id,value:true});return;
  }
  const reader=await openPackageFile(url,identity);
@@ -148,6 +148,7 @@ try {
   assert.equal(stats.fileRequests, 1);
   await page.evaluate(identity => window.control("corrupt", identity), identity);
   await assert.rejects(read(), "offline corrupt content must fail");
+  assert.equal(await page.evaluate(identity => window.control("exists", identity), identity), false, "corrupt entries must be removed");
   await context.setOffline(false);
   assert.equal(await read(), text, "corrupt cache must recover the same pinned file");
   for (const path of ["/short", "/long", "/wrong"]) {
@@ -156,14 +157,14 @@ try {
       try { await window.readFile(url, identity); return false; } catch { return true; }
     }, { url: `${base}${path}`, identity });
     assert.equal(failed, true, `${path} data must not enter the cache`);
-    assert.equal(await page.evaluate(identity => window.control("size", identity), identity), 0, "invalid bytes must not be published");
+    assert.equal(await page.evaluate(identity => window.control("exists", identity), identity), false, "failed downloads must not leave a cache entry");
   }
   assert.equal(stats.preparations, 1);
   assert.equal(stats.exports, 1);
   assert.equal(firstTransfer, Buffer.byteLength(text));
   assert.equal(existsSync(join(publicFiles, packageManifest.files.find(file => file.tds_path === extra).digest.slice(7))), false);
   assert.equal(existsSync(join(root, "main.tex")), false);
-  console.log(JSON.stringify({ result: "passed", schema: "pqty.package/v1", initialFileRequests: 1, restartOfflineFileRequests: 0, bytesInFirstFetch: firstTransfer, preparations: stats.preparations, exports: stats.exports, checks: ["only requested file transferred", "native OPFS reads into WASM memory", "persistent restart/offline reuse", "offline corruption rejection", "same-identity recovery", "short/long/wrong-content rejection before publication", "no project source or compiler RPC"] }, null, 2));
+  console.log(JSON.stringify({ result: "passed", schema: "pqty.package/v1", initialFileRequests: 1, restartOfflineFileRequests: 0, bytesInFirstFetch: firstTransfer, preparations: stats.preparations, exports: stats.exports, checks: ["only requested file transferred", "native OPFS reads into WASM memory", "persistent restart/offline reuse", "offline corruption rejection", "same-identity recovery", "short/long/wrong-content rejection and cleanup", "no project source or compiler RPC"] }, null, 2));
 } finally {
   await context?.close();
   server.closeAllConnections();

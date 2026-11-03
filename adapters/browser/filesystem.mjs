@@ -3,7 +3,7 @@
 import { sha256 } from "@noble/hashes/sha2.js";
 
 const limit = 128 * 1024 * 1024; // Existing pqty per-file trust bound.
-const hex = bytes => Array.from(bytes, byte => byte.toString(16).padStart(2, "0")).join("");
+const hex = (bytes) => Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
 
 async function consume(stream, file, write, signal) {
   const reader = stream.getReader();
@@ -41,53 +41,85 @@ async function consume(stream, file, write, signal) {
  */
 export async function openPackageFile(input, file, { signal } = {}) {
   signal?.throwIfAborted();
-  if (!/^sha256:[a-f0-9]{64}$/.test(file?.digest ?? "")
-      || !Number.isSafeInteger(file?.size) || file.size < 0 || file.size > limit) {
+  if (
+    !/^sha256:[a-f0-9]{64}$/.test(file?.digest ?? "") ||
+    !Number.isSafeInteger(file?.size) ||
+    file.size < 0 ||
+    file.size > limit
+  ) {
     throw new Error("Invalid package file identity");
   }
   const url = new URL(input, globalThis.location?.href);
-  if (url.username || url.password || url.search || url.hash
-      || (url.protocol !== "https:" && !(url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)))) {
+  if (
+    url.username ||
+    url.password ||
+    url.search ||
+    url.hash ||
+    (url.protocol !== "https:" &&
+      !(url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)))
+  ) {
     throw new Error("Package files require an immutable HTTPS URL");
   }
-  const directory = await (await navigator.storage.getDirectory()).getDirectoryHandle("pqty.package-files.v1", { create: true });
+  const directory = await (
+    await navigator.storage.getDirectory()
+  ).getDirectoryHandle("pqty.package-files.v1", { create: true });
   // The native Web Lock serializes publication across tabs without a timer or
   // application lock file. Read-only OPFS handles remain shareable afterwards.
   return navigator.locks.request(`pqty:${file.digest}`, { signal }, async () => {
-    const handle = await directory.getFileHandle(file.digest.slice(7), { create: true });
+    const name = file.digest.slice(7);
+    const handle = await directory.getFileHandle(name, { create: true });
     let valid = false;
     const cached = await handle.getFile();
     if (cached.size === file.size) {
-      try { await consume(cached.stream(), file, undefined, signal); valid = true; }
-      catch { signal?.throwIfAborted(); }
+      try {
+        await consume(cached.stream(), file, undefined, signal);
+        valid = true;
+      } catch {
+        signal?.throwIfAborted();
+      }
     }
     if (!valid) {
-      const response = await fetch(url, { signal, credentials: "omit", cache: "no-store" });
-      if (!response.ok || !response.body) {
-        await response.body?.cancel().catch(() => {});
-        throw new Error(`Package file unavailable (${response.status})`);
-      }
-      const output = await handle.createWritable();
       try {
-        await consume(response.body, file, chunk => output.write(chunk), signal);
-        // createWritable publishes atomically at close, after verification.
-        await output.close();
+        const response = await fetch(url, { signal, credentials: "omit", cache: "no-store" });
+        if (!response.ok || !response.body) {
+          await response.body?.cancel().catch(() => {});
+          throw new Error(`Package file unavailable (${response.status})`);
+        }
+        const output = await handle.createWritable();
+        try {
+          await consume(response.body, file, (chunk) => output.write(chunk), signal);
+          // createWritable publishes atomically at close, after verification.
+          await output.close();
+        } catch (error) {
+          await output.abort().catch(() => {});
+          throw error;
+        }
       } catch (error) {
-        await output.abort().catch(() => {});
+        // Leave no empty or invalid entry behind for a failed download.
+        await directory.removeEntry(name).catch(() => {});
         throw error;
       }
     }
     signal?.throwIfAborted();
+    // Chromium shares "read-only" handles between readers. Engines without
+    // the mode ignore it and return an exclusive handle, so close() promptly.
     const reader = await handle.createSyncAccessHandle({ mode: "read-only" });
     return {
       size: file.size,
-      text() { return handle.getFile().then(file => file.text()); },
+      // Whole-file convenience for small text files (bounded by `limit`):
+      // the result is one string. Use readInto for large or binary files.
+      text() {
+        return handle.getFile().then((file) => file.text());
+      },
       readInto(target, offset) {
-        if (!Number.isSafeInteger(offset) || offset < 0) throw new Error("Invalid package file offset");
+        if (!Number.isSafeInteger(offset) || offset < 0)
+          throw new Error("Invalid package file offset");
         const length = Math.min(target.byteLength, Math.max(0, file.size - offset));
         return length ? reader.read(target.subarray(0, length), { at: offset }) : 0;
       },
-      close() { reader.close(); },
+      close() {
+        reader.close();
+      },
     };
   });
 }

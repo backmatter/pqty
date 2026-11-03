@@ -125,8 +125,15 @@ try {
 Fetch and OPFS manage chunking and persistence. The 128 MiB file limit matches
 pqty's existing artifact trust limit. Storage denial, an offline miss, or
 unrecoverable corruption fails explicitly; there is no unverified or alternate
-storage path. The adapter's optional `text()` method lets hosts scan dependency
-hints from verified files without creating a second JavaScript byte buffer.
+storage path. A failed or invalid download removes its OPFS entry. The adapter's
+optional `text()` method lets hosts scan dependency hints from verified files
+without a JavaScript byte buffer, but it returns the whole file as one string;
+use it only for small text files and `readInto` for everything else.
+
+Readers use `createSyncAccessHandle({ mode: "read-only" })`. Chromium shares
+such handles between workers and tabs. Engines that do not implement `mode`
+ignore it and return an exclusive handle, so concurrent readers of the same
+file must wait for `close()`.
 
 BYOB stream reads transfer their input ArrayBuffer, which excludes WASM linear
 memory. Native OPFS reads accept the WASM view directly. Hosts can suspend their
@@ -160,6 +167,6 @@ node scripts/check-browser-files.mjs /path/to/playwright/index.mjs /path/to/chro
 ```
 
 The fixture disables Chromium's separate HTTP cache so restart/offline checks
-specifically verify OPFS. Install the adapter's npm dependencies first, or pass
+specifically verify OPFS. Install the dependencies with `vp install` first, or pass
 the installed `@noble/hashes/sha2.js` path as a final argument. It deletes its temporary provider, store,
 public files, and browser profile after the check.
