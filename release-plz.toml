@@ -11,7 +11,8 @@ pr_draft = false
 publish = false
 release_always = false
 repo_url = "https://github.com/backmatter/pqty"
-semver_check = true
+# No users yet: stay on 0.1.x, so an API break must not trigger a minor bump.
+semver_check = false
 
 [[package]]
 name = "pqty"
