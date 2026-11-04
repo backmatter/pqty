@@ -5,6 +5,23 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.5](https://github.com/backmatter/pqty/compare/v0.1.4...v0.1.5) - 2026-11-04
+
+### Fixed
+
+- *(browser)* remove OPFS entries for failed downloads
+
+### Other
+
+- drop the release dispatch to texe
+- run the checks on every PR without a scope job
+- restore release-plz and its version-only CI reuse
+- move browser checks to Vite+ and pnpm, drop release-plz
+- *(bundle)* reject crafted bundles before publication
+- correct the 0.1.3 changelog and document bundle import trust
+- move to Rust 1.99.1 and the newest crates
+- *(pqty)* verify browser integrity and persistent offline storage
+
 ## [0.1.4](https://github.com/backmatter/pqty/compare/v0.1.3...v0.1.4) - 2026-11-02
 
 ### Changed
