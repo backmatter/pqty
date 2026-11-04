@@ -440,3 +440,11 @@ prepares and publishes all runtime providers serially. Registry and offline
 selection follow `package`; local `--tlpdb` or explicit `--tlpdb-url` are also
 supported. See [publication layout and completion semantics](package-serving.md#complete-publication-before-serving).
 Capabilities v1 advertises this command as `package_mirror: true`.
+
+Package-container downloads make at most three attempts per checked source for
+transient connection/body-read failures, timeouts, and HTTP 408, 429, 500, 502,
+503 or 504. Retries wait 250 ms then one second and start with fresh staging.
+Progress attempt numbers count actual attempts, including source fallbacks.
+Checksum/size mismatches, TLS/URL/redirect policy failures, permanent HTTP errors
+and local filesystem failures stop immediately. Offline mode never retries a
+network fetch; existing verified cache content is preserved on failure.

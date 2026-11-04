@@ -114,6 +114,77 @@ pub(super) fn get_with_safe_redirects(
     etag: Option<&str>,
     last_modified: Option<&str>,
 ) -> Result<HttpGetOutcome, PqtyError> {
+    get_with_safe_redirects_classified(url, allow_insecure, etag, last_modified)
+        .map_err(|failure| failure.error)
+}
+
+#[derive(Debug)]
+pub(super) struct FetchFailure {
+    pub(super) error: PqtyError,
+    pub(super) retryable: bool,
+}
+
+impl From<PqtyError> for FetchFailure {
+    fn from(error: PqtyError) -> Self {
+        Self {
+            error,
+            retryable: false,
+        }
+    }
+}
+
+impl std::fmt::Display for FetchFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.error.fmt(formatter)
+    }
+}
+
+pub(super) fn transient_io(error: &std::io::Error) -> bool {
+    if let Some(error) = error
+        .get_ref()
+        .and_then(|error| error.downcast_ref::<ureq::Error>())
+    {
+        return transient_http(error);
+    }
+    matches!(
+        error.kind(),
+        std::io::ErrorKind::UnexpectedEof
+            | std::io::ErrorKind::TimedOut
+            | std::io::ErrorKind::ConnectionReset
+            | std::io::ErrorKind::ConnectionAborted
+            | std::io::ErrorKind::ConnectionRefused
+            | std::io::ErrorKind::BrokenPipe
+            | std::io::ErrorKind::NotConnected
+    )
+}
+
+fn transient_http(error: &ureq::Error) -> bool {
+    match error {
+        ureq::Error::Io(error) => transient_io(error),
+        ureq::Error::Timeout(_) | ureq::Error::HostNotFound | ureq::Error::ConnectionFailed => true,
+        ureq::Error::StatusCode(status) => matches!(*status, 408 | 429 | 500 | 502 | 503 | 504),
+        _ => false, // TLS, URI, protocol, redirect and policy failures are terminal.
+    }
+}
+
+pub(super) fn get_with_safe_redirects_classified(
+    url: &str,
+    allow_insecure: bool,
+    etag: Option<&str>,
+    last_modified: Option<&str>,
+) -> Result<HttpGetOutcome, FetchFailure> {
+    let mut retryable = false;
+    get_with_safe_redirects_inner(url, allow_insecure, etag, last_modified, &mut retryable)
+        .map_err(|error| FetchFailure { error, retryable })
+}
+
+fn get_with_safe_redirects_inner(
+    url: &str,
+    allow_insecure: bool,
+    etag: Option<&str>,
+    last_modified: Option<&str>,
+    retryable: &mut bool,
+) -> Result<HttpGetOutcome, PqtyError> {
     validate_remote_url(url, allow_insecure)?;
     let agent = http_agent();
     let mut current = url::Url::parse(url)
@@ -135,11 +206,13 @@ pub(super) fn get_with_safe_redirects(
                 return Ok(HttpGetOutcome::NotModified);
             }
             Err(ureq::Error::StatusCode(status)) => {
+                *retryable = matches!(status, 408 | 429 | 500 | 502 | 503 | 504);
                 return Err(PqtyError::Usage(format!(
                     "fetch {current}: HTTP status {status}"
                 )));
             }
             Err(error) => {
+                *retryable = transient_http(&error);
                 return Err(PqtyError::Usage(format!("fetch {current}: {error}")));
             }
         };
@@ -214,6 +287,34 @@ pub(super) fn read_file_bounded(path: &Path, limit: u64) -> Result<Vec<u8>, Pqty
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn retry_classification_uses_typed_transport_errors_only() {
+        use std::io::{Error, ErrorKind};
+        assert!(super::transient_io(&Error::new(
+            ErrorKind::UnexpectedEof,
+            "peer disconnected"
+        )));
+        assert!(super::transient_io(&Error::new(
+            ErrorKind::TimedOut,
+            "deadline"
+        )));
+        assert!(!super::transient_io(&Error::new(
+            ErrorKind::InvalidData,
+            "Peer disconnected"
+        )));
+        assert!(!super::transient_http(&ureq::Error::Tls(
+            "invalid certificate"
+        )));
+        assert!(!super::transient_http(&ureq::Error::StatusCode(403)));
+        assert!(!super::transient_http(&ureq::Error::StatusCode(404)));
+        assert!(super::transient_http(&ureq::Error::StatusCode(503)));
+        let local_failure = super::FetchFailure::from(crate::PqtyError::Io {
+            path: "disk".into(),
+            source: Error::new(ErrorKind::TimedOut, "local write"),
+        });
+        assert!(!local_failure.retryable);
+    }
+
     use super::*;
     use std::{
         io::{BufRead, BufReader, Write},
