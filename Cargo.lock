@@ -870,7 +870,7 @@ dependencies = [
 
 [[package]]
 name = "pqty"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "base64 0.23.1",
  "clap",
@@ -890,7 +890,7 @@ dependencies = [
 
 [[package]]
 name = "pqty-fls"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "clap",
  "serde",
