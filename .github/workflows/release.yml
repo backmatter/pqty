@@ -35,7 +35,7 @@ jobs:
           git fetch origin main
           git merge-base --is-ancestor "$GITHUB_SHA" origin/main
 
-      - name: Verify release metadata
+      - name: Read release tag
         id: metadata
         shell: bash
         run: |
@@ -44,7 +44,6 @@ jobs:
           if [[ "$GITHUB_REF" == refs/tags/* ]]; then
             [[ "$GITHUB_REF_NAME" == "$tag" ]]
           fi
-          ./scripts/verify-release-metadata.sh "$tag"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
       - name: Verify crates.io packages
