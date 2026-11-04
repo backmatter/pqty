@@ -64,6 +64,124 @@ pub struct LanguageManifest {
     pub languages: Vec<ResolvedLanguage>,
 }
 
+impl HyphenationDeclaration {
+    pub(crate) fn validate(&self) -> Result<(), PqtyError> {
+        validate_language_name(&self.name)?;
+        let mut names = BTreeSet::new();
+        for synonym in &self.synonyms {
+            validate_language_name(synonym)?;
+            if !names.insert(synonym) {
+                return Err(invalid("repeated language synonym"));
+            }
+        }
+        validate_tds_path(&self.loader, "language loader")?;
+        for paths in [&self.patterns, &self.exceptions] {
+            let mut unique = BTreeSet::new();
+            for path in paths {
+                validate_tds_path(path, "language data")?;
+                if !unique.insert(path) {
+                    return Err(invalid("repeated language data path"));
+                }
+            }
+        }
+        let mut attributes = BTreeSet::new();
+        for attribute in &self.attributes {
+            if attribute.name.is_empty()
+                || !attribute
+                    .name
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'_')
+                || !attributes.insert(&attribute.name)
+                || attribute.value.chars().any(char::is_control)
+            {
+                return Err(invalid("invalid language attribute"));
+            }
+        }
+        Ok(())
+    }
+}
+
+// Project only declarations backed by the already locked runtime files. No
+// registry reads or downloads are needed when an exact lock is replayed offline.
+pub(crate) fn locked_languages(lock: &LockFile) -> Result<Vec<ResolvedLanguage>, PqtyError> {
+    let files = lock
+        .closure
+        .iter()
+        .flat_map(|entry| &entry.files)
+        .collect::<Vec<_>>();
+    let resolve = |request: &str| -> Result<Option<String>, PqtyError> {
+        let request = normalize_runfile(request).1;
+        let matches = files
+            .iter()
+            .filter(|file| {
+                if request.contains('/') {
+                    file.tds_path == request
+                } else {
+                    file.tds_path.rsplit('/').next() == Some(request.as_str())
+                }
+            })
+            .collect::<Vec<_>>();
+        match matches.as_slice() {
+            [] => Ok(None),
+            [file] => Ok(Some(file.tds_path.clone())),
+            _ => Err(invalid(format!(
+                "locked language file is ambiguous: {request}"
+            ))),
+        }
+    };
+    let mut languages = BTreeMap::new();
+    let mut names = BTreeSet::new();
+    for entry in &lock.closure {
+        for declaration in &entry.hyphenation {
+            declaration.validate()?;
+            let mut declaration = declaration.clone();
+            let requests = std::iter::once(&declaration.loader)
+                .chain(&declaration.patterns)
+                .chain(&declaration.exceptions);
+            if requests
+                .clone()
+                .any(|path| matches!(resolve(path), Ok(None)))
+            {
+                // A declaration alone does not authorize adding another package.
+                // Only complete installed languages are enabled by the consumer.
+                continue;
+            }
+            declaration.loader =
+                resolve(&declaration.loader)?.ok_or_else(|| invalid("missing language loader"))?;
+            declaration.patterns = declaration
+                .patterns
+                .iter()
+                .map(|path| resolve(path)?.ok_or_else(|| invalid("missing language pattern")))
+                .collect::<Result<_, _>>()?;
+            declaration.exceptions = declaration
+                .exceptions
+                .iter()
+                .map(|path| resolve(path)?.ok_or_else(|| invalid("missing language exception")))
+                .collect::<Result<_, _>>()?;
+            for name in std::iter::once(&declaration.name).chain(
+                declaration
+                    .synonyms
+                    .iter()
+                    .filter(|synonym| **synonym != declaration.name),
+            ) {
+                if !names.insert(name.clone()) {
+                    return Err(invalid(format!(
+                        "locked language name is ambiguous: {name}"
+                    )));
+                }
+            }
+            languages.insert(
+                (declaration.name.clone(), entry.provider.clone()),
+                ResolvedLanguage {
+                    provider: entry.provider.clone(),
+                    declaration,
+                },
+            );
+        }
+    }
+    Ok(languages.into_values().collect())
+}
+
 impl LanguageManifest {
     /// Verify every declaration, path, and registry record against an index.
     ///

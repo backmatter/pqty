@@ -53,6 +53,7 @@ pub(crate) fn resolved_from(
         store_key: None,
         engines: Vec::new(),
         font_maps: meta.map_or_else(Vec::new, |meta| meta.font_maps.clone()),
+        hyphenation: meta.map_or_else(Vec::new, |meta| meta.hyphenation.clone()),
         runtime_requests: Vec::new(),
         files: Vec::new(),
     }
@@ -129,6 +130,8 @@ pub fn resolve(lock: &mut LockFile, index: &impl PackageRegistry) {
     }
 
     super::inputs::resolve_inputs(lock, index, &registry_id, &mut closure, &mut queue);
+
+    super::inputs::resolve_graphics(lock, index, &registry_id, &mut closure, &mut queue);
 
     // Expand tlpdb data dependencies, including TLCore and ConTeXt runfiles.
     while let Some(provider) = queue.pop_front() {

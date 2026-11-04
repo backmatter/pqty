@@ -255,6 +255,15 @@ fn validate_provider_records<'a>(
         validate_unique_nonempty(&entry.requested_by, "provider requested_by")?;
         validate_unique_nonempty(&entry.engines, "provider engines")?;
         validate_unique_nonempty(&entry.font_maps, "provider font maps")?;
+        let mut languages = BTreeSet::new();
+        for declaration in &entry.hyphenation {
+            declaration.validate()?;
+            if !languages.insert(&declaration.name) {
+                return Err(PqtyError::Usage(
+                    "duplicate provider language declaration".into(),
+                ));
+            }
+        }
         validate_unique_nonempty(&entry.runtime_requests, "provider runtime requests")?;
         for request in &entry.runtime_requests {
             validate_portable_path(request, "provider runtime request")?;
