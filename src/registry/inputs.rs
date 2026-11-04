@@ -14,15 +14,88 @@ pub(crate) fn has_registry_inputs(lock: &LockFile) -> bool {
     lock.inputs
         .iter()
         .any(|input| literal_input(input).is_some())
+        || lock
+            .graphics
+            .iter()
+            .any(|graphic| graphic.resolved_path.is_none() && literal_name(&graphic.name))
 }
 
 fn literal_input(input: &InputRecord) -> Option<&str> {
     let name = input.name.trim();
-    (matches!(input.kind, InputKind::Input)
-        && input.resolved_path.is_none()
-        && !name.contains(['\\', '#', '{', '}'])
-        && validate_tds_path(name, "literal TeX input").is_ok())
-    .then_some(name)
+    (matches!(input.kind, InputKind::Input) && input.resolved_path.is_none() && literal_name(name))
+        .then_some(name)
+}
+
+fn literal_name(name: &str) -> bool {
+    !name.contains(['\\', '#', '{', '}'])
+        && validate_tds_path(name, "literal package input").is_ok()
+}
+
+// The same provider can supply several supported graphic formats. They are
+// alternatives, not an ownership ambiguity; prefer the same extension order
+// as project-local graphics. Never choose between distinct providers.
+pub(super) fn resolve_graphics(
+    lock: &mut LockFile,
+    index: &impl PackageRegistry,
+    registry_id: &str,
+    closure: &mut BTreeMap<String, ResolvedPackage>,
+    queue: &mut VecDeque<String>,
+) {
+    for graphic in &lock.graphics {
+        let name = graphic.name.trim();
+        if graphic.resolved_path.is_some() || !literal_name(name) {
+            continue;
+        }
+        let candidates = if Path::new(name).extension().is_some() {
+            input_files(index, name)
+        } else {
+            ["pdf", "png", "jpg", "jpeg", "mps"]
+                .iter()
+                .flat_map(|extension| input_files(index, &format!("{name}.{extension}")))
+                .collect()
+        };
+        let providers = candidates
+            .iter()
+            .map(|(provider, _)| provider)
+            .collect::<BTreeSet<_>>();
+        if providers.is_empty() {
+            continue; // The missing project input remains unresolved.
+        }
+        lock.unresolved.retain(|record| {
+            !(record.kind == "graphic"
+                && record.name == graphic.name
+                && record.source.path == graphic.source.path
+                && record.source.line == graphic.source.line)
+        });
+        if providers.len() != 1
+            || candidates
+                .iter()
+                .filter(|(_, path)| {
+                    Path::new(path).extension() == Path::new(&candidates[0].1).extension()
+                })
+                .count()
+                != 1
+        {
+            lock.unresolved.push(UnresolvedRecord {
+                kind: "package".into(),
+                name: graphic.name.clone(),
+                source: graphic.source.clone(),
+                candidates: providers.into_iter().cloned().collect(),
+            });
+            continue;
+        }
+        let (provider, path) = &candidates[0];
+        let entry = closure
+            .entry(provider.clone())
+            .or_insert_with(|| resolved_from(index, provider, registry_id));
+        entry.direct = true;
+        if !entry.runtime_requests.contains(path) {
+            entry.runtime_requests.push(path.clone());
+        }
+        if !queue.contains(provider) {
+            queue.push_back(provider.clone());
+        }
+    }
 }
 
 pub(super) fn resolve_inputs(

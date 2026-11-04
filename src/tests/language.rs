@@ -241,6 +241,36 @@ fn verified_file_manifest_reproduces_language_lock_and_rejects_tampering() {
         &store,
     )
     .unwrap();
+    // Language metadata survives serialization and projects from the exact
+    // lock alone, with no registry or package reads during offline replay.
+    let restored: crate::LockFile =
+        serde_json::from_slice(&serde_json::to_vec(&lock).unwrap()).unwrap();
+    let environment = crate::ResolvedEnvironment::from_lock(&restored).unwrap();
+    assert_eq!(
+        environment.languages,
+        index.resolve_languages(&["demo".into()]).unwrap().languages
+    );
+    let schema: serde_json::Value =
+        serde_json::from_str(include_str!("../../schemas/pqty.env.schema.json")).unwrap();
+    jsonschema::draft202012::validate(&schema, &serde_json::to_value(&environment).unwrap())
+        .unwrap();
+    let mut changed = restored.clone();
+    changed
+        .closure
+        .iter_mut()
+        .find(|p| p.provider == "hyphen-demo")
+        .unwrap()
+        .hyphenation[0]
+        .left_hyphen_min = 1;
+    assert_ne!(
+        environment.fingerprint,
+        crate::ResolvedEnvironment::from_lock(&changed)
+            .unwrap()
+            .fingerprint
+    );
+    let schema: serde_json::Value =
+        serde_json::from_str(include_str!("../../schemas/pqty.lock.schema.json")).unwrap();
+    jsonschema::draft202012::validate(&schema, &serde_json::to_value(&restored).unwrap()).unwrap();
     let manifest = export_file_manifest(&lock, &store).unwrap();
     manifest.validate(&lock).unwrap();
     assert_eq!(manifest.files.len(), 4);
@@ -290,4 +320,43 @@ fn verified_file_manifest_reproduces_language_lock_and_rejects_tampering() {
     assert!(export_file_manifest(&lock, &store).is_err());
     make_test_tree_writable(&root);
     fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
+fn incomplete_language_closures_do_not_expand_and_ambiguous_files_fail() {
+    let index = TlpdbIndex::parse(METADATA, Path::new("tlpkg/texlive.tlpdb"));
+    let mut lock = scanned();
+    require_languages(&mut lock, &index, &["demo".into()]).unwrap();
+    assert_eq!(crate::registry::locked_languages(&lock).unwrap(), []);
+    let declaration = index
+        .resolve_languages(&["demo".into()])
+        .unwrap()
+        .languages
+        .remove(0)
+        .declaration;
+    let language = lock
+        .closure
+        .iter_mut()
+        .find(|p| p.provider == "hyphen-demo")
+        .unwrap();
+    for path in std::iter::once(&declaration.loader)
+        .chain(&declaration.patterns)
+        .chain(&declaration.exceptions)
+    {
+        language.files.push(crate::LockedFile {
+            tds_path: path.clone(),
+            kind: crate::ResourceKind::Data,
+        });
+    }
+    assert_eq!(crate::registry::locked_languages(&lock).unwrap().len(), 1);
+    let mut ambiguous = lock.clone();
+    let file = ambiguous
+        .closure
+        .iter()
+        .find(|p| p.provider == "hyphen-demo")
+        .unwrap()
+        .files[0]
+        .clone();
+    ambiguous.closure[0].files.push(file);
+    assert!(crate::registry::locked_languages(&ambiguous).is_err());
 }

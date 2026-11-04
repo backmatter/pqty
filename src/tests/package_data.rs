@@ -265,3 +265,44 @@ fn reserved_distribution_metadata_does_not_claim_runtime_package_files() {
             .any(|provider| provider.starts_with("00texlive."))
     );
 }
+
+#[test]
+fn package_graphics_resolve_only_unique_owners_and_preserve_local_precedence() {
+    let metadata = format!(
+        "{METADATA}\nname mwe\ncategory Package\nrunfiles size=1\n RELOC/tex/latex/mwe/example-image-a.pdf\n RELOC/tex/latex/mwe/example-image-a.png\n"
+    );
+    let index = TlpdbIndex::parse(&metadata, Path::new("tlpkg/texlive.tlpdb"));
+    let mut tree = source(br"\includegraphics{example-image-a} \includegraphics{missing} \includegraphics{local} \includegraphics{../unsafe}");
+    tree.insert(VirtualPath::new("local.pdf").unwrap(), b"project bytes");
+    let mut lock = scan_source(&tree, VirtualPath::new("main.tex").unwrap()).unwrap();
+    resolve(&mut lock, &index);
+    assert_eq!(lock.closure.len(), 1);
+    assert_eq!(lock.closure[0].provider, "mwe");
+    assert_eq!(
+        lock.closure[0].runtime_requests,
+        ["tex/latex/mwe/example-image-a.pdf"]
+    );
+    assert_eq!(
+        lock.unresolved
+            .iter()
+            .map(|r| r.name.as_str())
+            .collect::<Vec<_>>(),
+        ["missing", "../unsafe"]
+    );
+    let metadata = format!(
+        "{metadata}\nname other\ncategory Package\nrunfiles size=1\n RELOC/tex/other/example-image-a.png\n"
+    );
+    let index = TlpdbIndex::parse(&metadata, Path::new("tlpkg/texlive.tlpdb"));
+    resolve(&mut lock, &index);
+    assert!(crate::fail_on_unresolved_packages(&lock).is_err());
+    assert!(lock.closure.is_empty());
+    let mut tree = source(br"\includegraphics{example-image-a}");
+    tree.insert(
+        VirtualPath::new("example-image-a.pdf").unwrap(),
+        b"project override",
+    );
+    let mut lock = scan_source(&tree, VirtualPath::new("main.tex").unwrap()).unwrap();
+    resolve(&mut lock, &index);
+    assert!(lock.closure.is_empty());
+    assert!(lock.unresolved.is_empty());
+}

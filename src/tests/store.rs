@@ -337,6 +337,7 @@ fn single_file_store(store: &Path, bytes: &[u8]) -> LockFile {
             store_key: Some(format!("sha256:{package_digest}")),
             engines: Vec::new(),
             font_maps: Vec::new(),
+            hyphenation: Vec::new(),
             runtime_requests: Vec::new(),
             files,
         }],

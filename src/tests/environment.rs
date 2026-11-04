@@ -102,6 +102,7 @@ fn environment_test_lock() -> LockFile {
             store_key: Some(format!("sha256:{}", "03".repeat(32))),
             engines: Vec::new(),
             font_maps: vec!["foo.map".to_string()],
+            hyphenation: Vec::new(),
             runtime_requests: Vec::new(),
             files,
         }],

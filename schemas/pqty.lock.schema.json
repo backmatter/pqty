@@ -595,6 +595,12 @@
           "items": {
             "$ref": "#/$defs/locked_file"
           }
+        },
+        "hyphenation": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/hyphenation_declaration"
+          }
         }
       }
     },
@@ -632,6 +638,88 @@
         "binary",
         "data"
       ]
+    },
+    "hyphenation_declaration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "synonyms",
+        "loader",
+        "patterns",
+        "exceptions",
+        "left_hyphen_min",
+        "right_hyphen_min",
+        "attributes"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "synonyms": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          }
+        },
+        "loader": {
+          "$ref": "#/$defs/virtual_path"
+        },
+        "patterns": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 100000,
+          "items": {
+            "$ref": "#/$defs/virtual_path"
+          }
+        },
+        "exceptions": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 100000,
+          "items": {
+            "$ref": "#/$defs/virtual_path"
+          }
+        },
+        "left_hyphen_min": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 255
+        },
+        "right_hyphen_min": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 255
+        },
+        "attributes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "value"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9_]+$"
+              },
+              "value": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
     }
   }
 }

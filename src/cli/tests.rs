@@ -43,6 +43,7 @@ fn hydrated(mut lock: LockFile) -> LockFile {
         store_key: Some(format!("sha256:{}", "07".repeat(32))),
         engines: Vec::new(),
         font_maps: Vec::new(),
+        hyphenation: Vec::new(),
         runtime_requests: Vec::new(),
         files: vec![LockedFile {
             tds_path: "tex/latex/foo/foo.sty".to_string(),

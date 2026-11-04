@@ -17,5 +17,6 @@ pub use resolution::{require_runtime, resolve};
 pub use tlpdb::TlpdbIndex;
 
 pub(crate) use inputs::has_registry_inputs;
+pub(crate) use language::locked_languages;
 pub(crate) use resolution::{normalized_consumer_requirements, resolved_from};
 pub(crate) use tlpdb::locate_tlpdb;
