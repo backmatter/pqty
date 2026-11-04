@@ -66,8 +66,19 @@ pub(crate) fn scan_commands(text: &str) -> Vec<(usize, ParsedCommand)> {
     let bytes = text.as_bytes();
     let n = bytes.len();
     let mut commands = Vec::new();
+    // shortvrb makes these character definitions global, even inside groups.
+    let mut short_verbs = std::collections::BTreeSet::new();
     let mut i = 0;
     while i < n {
+        let character = text[i..].chars().next().expect("character boundary");
+        if short_verbs.contains(&character) {
+            let start = i + character.len_utf8();
+            let end = text[start..].find('\n').map_or(n, |offset| start + offset);
+            i = text[start..end]
+                .find(character)
+                .map_or(end, |offset| start + offset + character.len_utf8());
+            continue;
+        }
         match bytes[i] {
             b'%' => {
                 while i < n && bytes[i] != b'\n' {
@@ -82,10 +93,33 @@ pub(crate) fn scan_commands(text: &str) -> Vec<(usize, ParsedCommand)> {
                 }
                 if j == name_start {
                     // Escaped control symbol (\%, \{, \\, ...): skip the symbol.
-                    i = (name_start + 1).min(n);
+                    i = name_start + text[name_start..].chars().next().map_or(0, char::len_utf8);
                     continue;
                 }
                 let name = &text[name_start..j];
+                if matches!(name, "MakeShortVerb" | "DeleteShortVerb") {
+                    let mut cursor = skip_gaps(text, j);
+                    if name == "MakeShortVerb" && text[cursor..].starts_with('*') {
+                        cursor = skip_gaps(text, cursor + 1);
+                    }
+                    if let Some((argument, next)) = read_group(text, cursor, '{', '}')
+                        && let Some(symbol) = argument.trim().strip_prefix('\\')
+                        && let Some(delimiter) = symbol.chars().next()
+                        && delimiter.len_utf8() == symbol.len()
+                        && !delimiter.is_alphabetic()
+                        && !delimiter.is_whitespace()
+                    {
+                        if name == "MakeShortVerb" {
+                            short_verbs.insert(delimiter);
+                        } else {
+                            short_verbs.remove(&delimiter);
+                        }
+                        i = next;
+                        continue;
+                    }
+                    i = j;
+                    continue;
+                }
                 if name == "verb" {
                     i = skip_verb(bytes, j, n);
                     continue;
@@ -121,7 +155,7 @@ pub(crate) fn scan_commands(text: &str) -> Vec<(usize, ParsedCommand)> {
                     i = j;
                 }
             }
-            _ => i += 1,
+            _ => i += character.len_utf8(),
         }
     }
     commands
@@ -141,7 +175,12 @@ fn parse_args(text: &str, start: usize, name: &str) -> (Vec<String>, Vec<String>
         }
     }
     let mut required = Vec::new();
-    while text[cursor..].starts_with('{') {
+    let arity = if matches!(name, "IfFileExists" | "InputIfFileExists") {
+        3
+    } else {
+        1
+    };
+    while required.len() < arity && text[cursor..].starts_with('{') {
         if let Some((value, next)) = read_group(text, cursor, '{', '}') {
             required.push(value);
             cursor = skip_gaps(text, next);

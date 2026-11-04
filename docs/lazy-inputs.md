@@ -230,3 +230,17 @@ commands. Availability of a KanjiMap does not imply support in an engine.
 `FontMapManifest::validate(&lock, &index)` verifies its complete metadata and
 ordering against the original snapshot. It does not read file contents. Retain
 the manifest when the consuming host needs metadata without the registry.
+
+### Literal package graphics and short verbatim
+
+Source discovery honors literal `\MakeShortVerb` / `\DeleteShortVerb`
+definitions, including the starred form, so inline documentation examples are
+not package dependencies. Delimiters are tracked within each scanned source;
+the scanner does not expand macros or execute TeX.
+
+Project-local graphics take precedence. For unresolved literal graphics, registry
+resolution considers `pdf`, `png`, `jpg`, `jpeg`, then `mps` when no extension is
+specified. Multiple formats from one provider are alternatives; distinct providers
+or multiple paths for the preferred format remain ambiguous. Missing project
+images and dynamic names stay unresolved. Registry-owned graphics are recorded
+as runtime requests, not as project-owned source paths.

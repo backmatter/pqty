@@ -127,3 +127,55 @@ use std::fs;
 
 use crate::tests::temporary_test_root;
 use crate::{TlpdbIndex, scan_commands};
+
+#[test]
+fn short_verbatim_delimiters_skip_examples_and_can_be_deleted() {
+    let text = r"\usepackage{shortvrb}
+{\MakeShortVerb*{\|}}
+\MakeShortVerb{\+}
+|\usepackage[|option|]{|\thestyle|}|
++\input{not-a-file}+
+\DeleteShortVerb{\|}
+|\usepackage{real}|
+\DeleteShortVerb{\+}
++\input{real-input}+
+\MakeShortVerb{\%}
+%\usepackage{hidden}%
+\DeleteShortVerb{\%}
+% \usepackage{commented}
+\usepackage{last}";
+    let commands = scan_commands(text);
+    assert_eq!(
+        commands
+            .iter()
+            .map(|(line, command)| (*line, command.required[0].as_str()))
+            .collect::<Vec<_>>(),
+        [
+            (1, "shortvrb"),
+            (7, "real"),
+            (9, "real-input"),
+            (14, "last")
+        ]
+    );
+}
+
+#[test]
+fn short_verbatim_does_not_cross_lines_or_interpret_verbatim_definitions() {
+    let text = r"\verb|\MakeShortVerb{\+}|
++\usepackage{real}+
+\begin{verbatim}
+\MakeShortVerb{\|}
+\end{verbatim}
+|\usepackage{also-real}|
+\MakeShortVerb{\|}
+|unfinished
+\usepackage{after-newline}";
+    let commands = scan_commands(text);
+    assert_eq!(
+        commands
+            .iter()
+            .map(|(_, command)| command.required[0].as_str())
+            .collect::<Vec<_>>(),
+        ["real", "also-real", "after-newline"]
+    );
+}

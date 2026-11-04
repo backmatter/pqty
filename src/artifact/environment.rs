@@ -115,6 +115,7 @@ impl ResolvedEnvironment {
                 external_tools: Vec::new(),
             },
             font_maps: font_maps.into_iter().collect(),
+            languages: crate::registry::locked_languages(lock)?,
             packages,
             files,
         };

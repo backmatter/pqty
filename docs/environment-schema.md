@@ -22,6 +22,7 @@ package layer.
 | `requirements.engines` | Known engine constraints; empty means unspecified. |
 | `requirements.external_tools` | Explicit non-engine runtime requirements. |
 | `font_maps` | Registry-declared map fragments required by the closure. |
+| `languages` | Available language declarations with exact loader/pattern/exception paths, projected from locked provider metadata and files. Omitted when empty. |
 | `packages` | Provider, source, integrity, and dependency metadata. |
 | `files` | Exact package-owned runtime-file index. |
 
@@ -46,3 +47,11 @@ A complete generated example is
 [`tests/golden/v1/environment.json`](../tests/golden/v1/environment.json).
 The machine-readable schema is
 [`schemas/pqty.env.schema.json`](../schemas/pqty.env.schema.json).
+
+Provider entries in `pqty.lock/v1` retain registry `AddHyphen` declarations in
+`hyphenation` (omitted when empty). The environment exposes only declarations
+whose complete loader and data files are already present in the exact closure;
+it never expands that closure to enable a language. Ambiguous file ownership or
+language names fail rather than select an arbitrary definition. Language metadata
+participates in the environment fingerprint. Frozen offline replay therefore
+needs no registry metadata fetch to generate language configuration.

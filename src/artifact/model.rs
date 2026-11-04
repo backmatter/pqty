@@ -340,6 +340,9 @@ pub struct ResolvedPackage {
     /// `addMixedMap`). Consumers combine these into their engine configuration.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub font_maps: Vec<String>,
+    /// Registry language declarations retained for offline format generation.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hyphenation: Vec<crate::HyphenationDeclaration>,
     /// Concrete runtime filenames whose static loads or engine-neutral traces
     /// caused this provider to enter the closure.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -446,6 +449,9 @@ pub struct ResolvedEnvironment {
     /// Registry-declared font-map fragments required by the package closure.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub font_maps: Vec<String>,
+    /// Language declarations whose runtime files are in the exact closure.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub languages: Vec<crate::ResolvedLanguage>,
     /// Providers in the exact package closure.
     pub packages: Vec<EnvironmentPackage>,
     /// Complete package-owned runtime-file index.
