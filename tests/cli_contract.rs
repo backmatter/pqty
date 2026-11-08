@@ -821,3 +821,26 @@ fn standalone_package_commands_need_no_project_and_export_only_one_file() {
     make_tree_writable(&root);
     fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn local_refresh_keeps_package_requests_no_provider_ships() {
+    // An edit refreshes the lock in place; a request no provider ships must
+    // stay recorded, or the refreshed lock fails validation (arXiv 2312.00752).
+    let (root, tlpdb) = create_fixture();
+    fs::write(root.join("main.tex"), br"\usepackage{foo,venue}").unwrap();
+    lock_local_fixture(&root, &tlpdb);
+    fs::write(root.join("main.tex"), b"% edited\n\\usepackage{foo,venue}").unwrap();
+    let refreshed = lock_local_fixture(&root, &tlpdb);
+    assert!(String::from_utf8_lossy(&refreshed.stdout).contains("refreshed"));
+    let lock = fixture_lock(&root);
+    let venue = lock["unresolved"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|record| record["name"] == "venue")
+        .expect("the unprovided request stays recorded");
+    assert_eq!(venue["kind"], "package");
+    assert_eq!(venue["source"]["line"], 2);
+    make_tree_writable(&root);
+    fs::remove_dir_all(root).unwrap();
+}
