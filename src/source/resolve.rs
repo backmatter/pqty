@@ -67,20 +67,23 @@ pub(super) fn resolve_with_extensions(
     let current_dir = Path::new(current_path.as_str())
         .parent()
         .filter(|path| !path.as_os_str().is_empty());
-    for candidate in candidates {
+    let paths_of = |candidate: &PathBuf| {
         let mut paths = Vec::new();
         if let Some(current_dir) = current_dir {
-            paths.push(current_dir.join(&candidate));
+            paths.push(current_dir.join(candidate));
         }
         paths.push(candidate.clone());
-        for path in paths {
+        paths
+    };
+    for candidate in &candidates {
+        for path in paths_of(candidate) {
             if let Some(path) = normalize_project_path(&path)
                 && let Some(bytes) = read_source_file(tree, &path)?
             {
                 return Ok(Some(ResolvedSourceFile { path, bytes }));
             }
         }
-        if let Some(candidate) = normalize_project_path(&candidate)
+        if let Some(candidate) = normalize_project_path(candidate)
             && let Some((path, bytes)) =
                 tree.search(&candidate).map_err(|source| PqtyError::Io {
                     path: PathBuf::from(candidate.as_str()),
@@ -88,6 +91,23 @@ pub(super) fn resolve_with_extensions(
                 })?
         {
             return Ok(Some(ResolvedSourceFile { path, bytes }));
+        }
+    }
+    // Then ignoring ASCII case, as kpathsea does once an exact search failed
+    // (`texmf_casefold_search`): arXiv sources such as `\usepackage{ACL2023}`
+    // next to `acl2023.sty` build with TeX Live on case-sensitive disks.
+    for candidate in &candidates {
+        for path in paths_of(candidate) {
+            if let Some(path) = normalize_project_path(&path)
+                && let Some((path, bytes)) =
+                    tree.read_case_folded(&path)
+                        .map_err(|source| PqtyError::Io {
+                            path: PathBuf::from(path.as_str()),
+                            source,
+                        })?
+            {
+                return Ok(Some(ResolvedSourceFile { path, bytes }));
+            }
         }
     }
     Ok(None)

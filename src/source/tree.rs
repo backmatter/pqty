@@ -135,9 +135,43 @@ impl SourceTree for FileSystemSourceTree {
         }
         Ok(None)
     }
+
+    fn read_case_folded(&self, path: &VirtualPath) -> io::Result<Option<(VirtualPath, Vec<u8>)>> {
+        self.case_folded(path)
+    }
 }
 
 impl FileSystemSourceTree {
+    fn case_folded(&self, path: &VirtualPath) -> io::Result<Option<(VirtualPath, Vec<u8>)>> {
+        let path = Path::new(path.as_str());
+        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+            return Ok(None);
+        };
+        let directory = self.root.join(path.parent().unwrap_or(Path::new("")));
+        let directory = match directory.canonicalize() {
+            Ok(directory) if directory.starts_with(&self.root) && directory.is_dir() => directory,
+            Ok(_) => return Ok(None),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error),
+        };
+        let mut matches = Vec::new();
+        for entry in fs::read_dir(&directory)? {
+            let entry = entry?;
+            if let Some(candidate) = entry.file_name().to_str()
+                && candidate.eq_ignore_ascii_case(name)
+            {
+                matches.push(candidate.to_owned());
+            }
+        }
+        matches.sort();
+        for candidate in matches {
+            if let Some(found) = self.read_search_candidate(&directory.join(candidate))? {
+                return Ok(Some(found));
+            }
+        }
+        Ok(None)
+    }
+
     fn read_search_candidate(
         &self,
         candidate: &Path,
@@ -181,5 +215,28 @@ impl MemorySourceTree {
 impl SourceTree for MemorySourceTree {
     fn read(&self, path: &VirtualPath) -> io::Result<Option<Vec<u8>>> {
         Ok(self.files.get(path).cloned())
+    }
+
+    fn read_case_folded(&self, path: &VirtualPath) -> io::Result<Option<(VirtualPath, Vec<u8>)>> {
+        let requested = Path::new(path.as_str());
+        let Some(name) = requested.file_name().and_then(|name| name.to_str()) else {
+            return Ok(None);
+        };
+        let mut matches = self
+            .files
+            .iter()
+            .filter(|(candidate, _)| {
+                let candidate = Path::new(candidate.as_str());
+                candidate.parent() == requested.parent()
+                    && candidate
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .is_some_and(|candidate| candidate.eq_ignore_ascii_case(name))
+            })
+            .collect::<Vec<_>>();
+        matches.sort_by(|(a, _), (b, _)| a.as_str().cmp(b.as_str()));
+        Ok(matches
+            .first()
+            .map(|(path, bytes)| ((*path).clone(), (*bytes).clone())))
     }
 }
