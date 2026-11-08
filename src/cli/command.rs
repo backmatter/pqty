@@ -490,6 +490,7 @@ fn run_lock(context: &ExecutionContext, command: Command) -> Result<(), PqtyErro
     resolve(&mut lock, &index);
     require_runtime(&mut lock, &index, &required_files, &required_providers)?;
     fail_on_unresolved_packages(&lock)?;
+    warn_on_unprovided_packages(&lock);
     hydrate_lock(&mut lock, &index, &source, &store)?;
     ResolvedEnvironment::from_lock(&lock)?;
     write_lock(&output, &lock)?;
@@ -814,4 +815,21 @@ fn resolution_requirements(lock: &LockFile) -> BTreeSet<(String, String, bool)> 
             }),
     );
     requirements
+}
+
+/// Name the scanned packages no provider ships: the lock leaves them out, and
+/// TeX reports any of them the document really loads.
+fn warn_on_unprovided_packages(lock: &LockFile) {
+    let names = lock
+        .unresolved
+        .iter()
+        .filter(|item| item.kind == "package" && item.candidates.is_empty())
+        .map(|item| item.name.as_str())
+        .collect::<BTreeSet<_>>();
+    if !names.is_empty() {
+        eprintln!(
+            "pqty: no registry provider ships {}; left out of the lock (TeX reports any the document loads)",
+            names.into_iter().collect::<Vec<_>>().join(", ")
+        );
+    }
 }

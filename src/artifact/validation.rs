@@ -11,21 +11,23 @@ use crate::{
     LOCK_SCHEMA, MAX_CONTAINER_COMPRESSED_BYTES, PqtyError, TRACE_REPORT_SCHEMA, TRACE_SCHEMA,
 };
 
+/// Refuse package requests several providers could satisfy: a lock must not
+/// pick one. A request no provider ships stays recorded in `unresolved` and
+/// does not block the lock, like a missing graphic or input: the static scan
+/// cannot evaluate conditionals, so it also finds packages a document never
+/// loads (`\iftoggle{arxiv}{...}{\usepackage{venue}}`), and a document that
+/// does load one gets TeX's own "file not found" error, as with TeX Live.
 pub(crate) fn fail_on_unresolved_packages(lock: &LockFile) -> Result<(), PqtyError> {
     let unresolved = lock
         .unresolved
         .iter()
-        .filter(|item| item.kind == "package")
+        .filter(|item| item.kind == "package" && !item.candidates.is_empty())
         .map(|item| {
-            if item.candidates.is_empty() {
-                item.name.clone()
-            } else {
-                format!(
-                    "{} (ambiguous providers: {})",
-                    item.name,
-                    item.candidates.join(", ")
-                )
-            }
+            format!(
+                "{} (ambiguous providers: {})",
+                item.name,
+                item.candidates.join(", ")
+            )
         })
         .collect::<Vec<_>>();
     if unresolved.is_empty() {
@@ -437,6 +439,15 @@ fn validate_exact_contents(lock: &LockFile) -> Result<(), PqtyError> {
     }
 
     for (kind, name, extension) in non_local_requests(lock) {
+        // A request no provider ships stays recorded as unresolved instead
+        // (`fail_on_unresolved_packages`).
+        if lock
+            .unresolved
+            .iter()
+            .any(|item| item.kind == "package" && item.name == name && item.candidates.is_empty())
+        {
+            continue;
+        }
         let request = format!("{name}.{extension}");
         let owner = lock.closure.iter().find(|entry| {
             entry.satisfies.iter().any(|satisfied| satisfied == name)
