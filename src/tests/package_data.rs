@@ -306,3 +306,31 @@ fn package_graphics_resolve_only_unique_owners_and_preserve_local_precedence() {
     assert!(lock.closure.is_empty());
     assert!(lock.unresolved.is_empty());
 }
+
+#[test]
+fn packages_no_provider_ships_stay_unresolved_without_blocking_the_lock() {
+    // arXiv 2312.00752 loads its venue style only in a branch an `\iftoggle`
+    // never takes; TeX Live builds it, so the lock must not refuse it.
+    let index = TlpdbIndex::parse(METADATA, Path::new("tlpkg/texlive.tlpdb"));
+    let mut lock = scan_source(
+        &source(br"\iftoggle{arxiv}{}{\usepackage{colm2024_conference}}"),
+        VirtualPath::new("main.tex").unwrap(),
+    )
+    .unwrap();
+    resolve(&mut lock, &index);
+    assert!(crate::fail_on_unresolved_packages(&lock).is_ok());
+    assert_eq!(
+        lock.unresolved
+            .iter()
+            .map(|item| (
+                item.kind.as_str(),
+                item.name.as_str(),
+                item.candidates.len()
+            ))
+            .collect::<Vec<_>>(),
+        [("package", "colm2024_conference", 0)]
+    );
+    // A request several providers ship still needs a choice.
+    lock.unresolved[0].candidates = vec!["one".into(), "two".into()];
+    assert!(crate::fail_on_unresolved_packages(&lock).is_err());
+}

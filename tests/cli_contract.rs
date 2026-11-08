@@ -649,10 +649,21 @@ fn local_lock_reuse_checks_source_bytes_metadata_and_requirements() {
         .arg(root.join("pqty.lock"))
         .output()
         .unwrap();
+    // A removed provider is never reused from the old lock: the new one
+    // leaves it out and records the request as unresolved, which TeX reports
+    // if the document loads it.
+    assert!(removed.status.success());
+    assert!(String::from_utf8_lossy(&removed.stderr).contains("no registry provider ships foo"));
+    let relocked = fixture_lock(&root);
     assert!(
-        !removed.status.success(),
+        relocked["closure"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|entry| entry["provider"] != "foo"),
         "removed provider must not reuse its old lock"
     );
+    assert_eq!(relocked["unresolved"][0]["name"], "foo");
     make_tree_writable(&root);
     fs::remove_dir_all(root).unwrap();
 }
