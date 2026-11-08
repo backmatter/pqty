@@ -719,8 +719,49 @@ fn refresh_project_records(existing: LockFile, scanned: &LockFile) -> LockFile {
     refreshed.inputs.clone_from(&scanned.inputs);
     refreshed.bibliographies.clone_from(&scanned.bibliographies);
     refreshed.graphics.clone_from(&scanned.graphics);
+    // Package requests no provider ships are recorded by resolution, not by
+    // the scan; the requests are unchanged (`resolution_requirements`), so
+    // keep those records, at the location the current sources request them.
+    let unprovided = refreshed
+        .unresolved
+        .iter()
+        .filter(|record| record.kind == "package")
+        .filter_map(|record| {
+            Some(crate::UnresolvedRecord {
+                source: request_location(scanned, &record.name)?.clone(),
+                ..record.clone()
+            })
+        })
+        .collect::<Vec<_>>();
     refreshed.unresolved.clone_from(&scanned.unresolved);
+    refreshed.unresolved.extend(unprovided);
     refreshed
+}
+
+/// Where the scanned sources request a non-local class, package or
+/// bibliography style.
+fn request_location<'a>(scanned: &'a LockFile, name: &str) -> Option<&'a crate::Location> {
+    scanned
+        .document_class
+        .iter()
+        .chain(&scanned.loaded_classes)
+        .filter(|class| class.resolved_path.is_none() && class.name == name)
+        .map(|class| &class.source)
+        .chain(
+            scanned
+                .packages
+                .iter()
+                .filter(|package| package.resolved_path.is_none() && package.name == name)
+                .map(|package| &package.source),
+        )
+        .chain(
+            scanned
+                .bibliographies
+                .iter()
+                .filter(|record| record.resolved_path.is_none() && record.name == name)
+                .map(|record| &record.source),
+        )
+        .next()
 }
 
 pub(super) fn registry_selection_matches(
