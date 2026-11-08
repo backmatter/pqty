@@ -327,12 +327,13 @@ fn project_files_are_found_ignoring_ascii_case_after_an_exact_miss() {
     fs::write(root.join("main.tex"), r"\usepackage{ACL2023}").unwrap();
     fs::write(root.join("acl2023.sty"), "").unwrap();
     let lock = scan_project_at(&root, root.join("main.tex")).unwrap();
-    assert_eq!(
-        lock.packages
-            .iter()
-            .find(|package| package.name == "ACL2023")
-            .and_then(|package| package.resolved_path.as_deref()),
-        Some("acl2023.sty")
-    );
+    // A case-insensitive disk (macOS, Windows) already finds it exactly, under
+    // the requested spelling.
+    let resolved = lock
+        .packages
+        .iter()
+        .find(|package| package.name == "ACL2023")
+        .and_then(|package| package.resolved_path.clone());
+    assert!(resolved.is_some_and(|path| path.eq_ignore_ascii_case("acl2023.sty")));
     fs::remove_dir_all(root).unwrap();
 }
