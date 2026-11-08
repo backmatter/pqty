@@ -280,3 +280,59 @@ use crate::{
     BibliographyKind, LinkMode, MemorySourceTree, TlpdbIndex, VirtualPath, install_locked,
     read_lock, resolve, scan_project_at, scan_project_at_with_roots, scan_source,
 };
+
+#[test]
+fn project_files_are_found_ignoring_ascii_case_after_an_exact_miss() {
+    // arXiv 2302.13971 loads `\usepackage{ACL2023}` and ships `acl2023.sty`:
+    // TeX Live's kpathsea finds it on a case-sensitive disk once an exact
+    // search failed (`texmf_casefold_search`, on by default), and so does pqty.
+    let mut source = MemorySourceTree::default();
+    source.insert(
+        VirtualPath::new("main.tex").unwrap(),
+        br"\documentclass{article}
+\usepackage{ACL2023}
+\usepackage{Exact}
+\input{Chapters/Intro}
+\input{chapters/Outro}
+",
+    );
+    source.insert(VirtualPath::new("acl2023.sty").unwrap(), b"");
+    source.insert(VirtualPath::new("Exact.sty").unwrap(), b"");
+    source.insert(VirtualPath::new("exact.sty").unwrap(), b"");
+    source.insert(VirtualPath::new("Chapters/intro.tex").unwrap(), b"");
+    source.insert(VirtualPath::new("Chapters/outro.tex").unwrap(), b"");
+
+    let lock = scan_source(&source, VirtualPath::new("main.tex").unwrap()).unwrap();
+    let resolved = |name: &str| {
+        lock.packages
+            .iter()
+            .find(|package| package.name == name)
+            .and_then(|package| package.resolved_path.clone())
+    };
+    assert_eq!(resolved("ACL2023").as_deref(), Some("acl2023.sty"));
+    // An exact match still wins over a case variant.
+    assert_eq!(resolved("Exact").as_deref(), Some("Exact.sty"));
+    // Only the file name folds, as in kpathsea: the directory must match.
+    let sources = lock
+        .sources
+        .iter()
+        .map(|source| source.path.as_str())
+        .collect::<Vec<_>>();
+    assert!(sources.contains(&"Chapters/intro.tex"));
+    assert!(!sources.contains(&"Chapters/outro.tex"));
+
+    // The filesystem tree behaves the same.
+    let root = temporary_test_root("case-folded-source");
+    fs::create_dir_all(&root).unwrap();
+    fs::write(root.join("main.tex"), r"\usepackage{ACL2023}").unwrap();
+    fs::write(root.join("acl2023.sty"), "").unwrap();
+    let lock = scan_project_at(&root, root.join("main.tex")).unwrap();
+    assert_eq!(
+        lock.packages
+            .iter()
+            .find(|package| package.name == "ACL2023")
+            .and_then(|package| package.resolved_path.as_deref()),
+        Some("acl2023.sty")
+    );
+    fs::remove_dir_all(root).unwrap();
+}

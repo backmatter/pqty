@@ -105,4 +105,20 @@ pub trait SourceTree {
     fn search(&self, _path: &VirtualPath) -> io::Result<Option<(VirtualPath, Vec<u8>)>> {
         Ok(None)
     }
+
+    /// Read the file in `path`'s directory whose name equals `path`'s ignoring
+    /// ASCII case, the first in byte order when several do: the lookup TeX
+    /// Live's kpathsea falls back to (`texmf_casefold_search`, on by default)
+    /// once an exact search found nothing, so `\usepackage{ACL2023}` loads a
+    /// project's `acl2023.sty` on a case-sensitive disk as well.
+    ///
+    /// Snapshot-backed consumers that do not implement it keep the default
+    /// empty result.
+    ///
+    /// # Errors
+    ///
+    /// Returns the backing tree's I/O error.
+    fn read_case_folded(&self, _path: &VirtualPath) -> io::Result<Option<(VirtualPath, Vec<u8>)>> {
+        Ok(None)
+    }
 }
